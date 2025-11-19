@@ -82,16 +82,41 @@ def load_and_process_data(year, event, session_key):
     return context_data, session.name
 
 def create_prediction_prompt(context_data, year, event, session_name):
-    """בניית הפרומפט המלא למודל Gemini."""
+    """בניית הפרומפט המלא למודל Gemini. הקוד הזה תוקן כדי למנוע שגיאות תחביר של מחרוזת."""
     
     prompt_data = f"--- נתונים גולמיים לניתוח (Top 10 Drivers, Race/Session Laps) ---\n{context_data}"
 
-    # 2. בניית הפרומפט המלא (בהתבסס על V33)
-    prompt = f"""
-    אתה אנליסט אסטרטגיה בכיר של פורמולה 1. משימתך היא לנתח את הנתונים הסטטיסטיים של הקפות המרוץ ({session_name}, {event} {year}) ולספק דוח אסטרטגי מלא ותחזית מנצח.
-    
-    {prompt_data}
+    # 2. בניית הפרומפט המלא (המחרוזת שונתה כדי למנוע SyntaxError)
+    prompt = (
+        "אתה אנליסט אסטרטגיה בכיר של פורמולה 1. משימתך היא לנתח את הנתונים הסטטיסטיים של הקפות המרוץ "
+        f"({session_name}, {event} {year}) ולספק דוח אסטרטגי מלא ותחזית מנצח.\n\n"
+        f"{prompt_data}\n\n"
+        "--- הנחיות לניתוח (V33 - ניתוח משולב R/Q/S וקונטקסט) ---\n"
+        "1. **Immediate Prediction (Executive Summary):** בחר מנצח אחד והצג את הנימוק העיקרי (קצב ממוצע או קונסיסטנטיות) בשורה אחת, **באנגלית בלבד**. (חובה)\n"
+        "2. **Overall Performance Summary:** נתח את הקצב הממוצע (Avg Time) והעקביות (Var). Var < 1.0 נחשב לעקביות מעולה. Var > 5.0 עשוי להצביע על חוסר קונסיסטנטיות או הפרעות במרוץ (כגון תאונה או דגל אדום).\n"
+        "3. **Tire and Strategy Deep Dive:** נתח את הנתונים ביחס למסלול (למשל, מקסיקו=גובה רב, מונזה=מהירות גבוהה). הסבר איזה סוג הגדרה (High Downforce/Low Downforce) משתקף בנתונים, בהנחה שנתון ה-Max Speed של הנהגים המובילים זמין בניתוח שלך.\n"
+        "4. **Weather/Track Influence:** הוסף קונטקסט כללי על תנאי המסלול והשפעתם על הצמיגים. הנח תנאים יציבים וחמים אלא אם כן ה-Var הגבוה מעיד על שימוש בצמיגי גשם/אינטר.\n"
+        "5. **Strategic Conclusions and Winner Justification:** הצג סיכום והצדקה ברורה לבחירת המנצח על בסיס נתונים ושיקולים אסטרטגיים.\n"
+        "6. **Confidence Score Table (D5):** ספק טבלת Confidence Score (בפורמט Markdown) המכילה את 5 המועמדים המובילים עם אחוז ביטחון (סך כל האחוזים חייב להיות 100%). **תקן את פורמט הטבלה כך שיופיע תקין ב-Markdown**.\n\n"
+        
+        "--- פורמט פלט חובה (Markdown, עברית למעט הכותרת הראשית) ---\n"
+        f"🏎️ Strategy Report: {event} {year}\n\n"
+        f"Based on: Specific Session Data ({session_name} Combined)\n\n"
+        "Immediate Prediction (Executive Summary)\n"
+        "...\n\n"
+        "Overall Performance Summary\n"
+        "...\n\n"
+        "Tire and Strategy Deep Dive\n"
+        "...\n\n"
+        "Weather/Track Influence\n"
+        "...\n\n"
+        "Strategic Conclusions and Winner Justification\n"
+        "...\n\n"
+        "📊 Confidence Score Table (D5 - Visual Data)\n"
+        "| Driver | Confidence Score (%) |\n"
+        "|:--- | :--- |\n"
+        "...\n"
+    )
+    return prompt
 
-    --- הנחיות לניתוח (V33 - ניתוח משולב R/Q/S וקונטקסט) ---
-    1. **Immediate Prediction (Executive Summary):** בחר מנצח אחד והצג את הנימוק העיקרי (קצב ממוצע או קונסיסטנטיות) בשורה אחת, **באנגלית בלבד**. (חובה)
-    2. **Overall Performance Summary:** נתח את
+@retry(wait=wait_exponential(multiplier=1,

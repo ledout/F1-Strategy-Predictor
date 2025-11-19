@@ -99,6 +99,86 @@ def load_and_process_data(year, event, session_key):
 
     return context_data, session.name
 
+@retry(wait=wait_exponential(multiplier=1, min=2, max=10), stop=stop_after_attempt(3))
+def get_gemini_prediction(prompt):
+    """שולח את הפרומפט ל-Gemini Flash ומשתמש במפתח מה-Secrets."""
+    
+    try:
+        api_key = st.secrets.get("GEMINI_API_KEY")
+        if not api_key:
+             raise ValueError("GEMINI_API_KEY לא נמצא ב-Streamlit Secrets. אנא הגדר אותו.")
+    except Exception as e:
+        raise ValueError(f"שגיאת API Key: {e}")
+        
+    client = genai.Client(api_key=api_key)
+    response = client.models.generate_content(
+        model=MODEL_NAME,
+        contents=prompt
+    )
+    return response.text
+
+# --- פונקציות לתחזית מוקדמת (Pre-Race) ---
+
+@st.cache_data(ttl=3600, show_spinner="טוען לוח זמנים F1...")
+def find_last_three_races_data(current_year, event):
+    """מוצא את שלושת המרוצים ה'רגילים' האחרונים שהיו אמורים להתקיים העונה ומחזיר את נתוני המרוץ שלהם."""
+    
+    try:
+        schedule = fastf1.get_event_schedule(current_year)
+    except Exception:
+        return [], "שגיאה: לא ניתן לטעון את לוח הזמנים של השנה הנוכחית."
+    
+    try:
+        # מנסה למצוא את האינדקס של האירוע הנוכחי
+        event_index = schedule[schedule['EventName'] == event].index[0]
+    except IndexError:
+        # אם האירוע לא נמצא, משתמש באינדקס האחרון
+        event_index = len(schedule) 
+    
+    # --- התיקון העיקרי: התעלמות מ-'EventCompleted' ומסתמכים רק על אירוע קודם ---
+    try:
+        # 1. מציאת אירועים רגילים (לא ספרינטים) שהיו אמורים להתקיים לפני האירוע הנוכחי
+        # הסרנו את התנאי EventCompleted == True
+        potential_races = schedule.loc[
+            (schedule.index < event_index) & 
+            (schedule['EventFormat'] == 'conventional')
+        ].sort_index(ascending=False).head(3) 
+
+    except KeyError as e:
+        # לכידת שגיאת KeyError ספציפית
+        st.error(f"❌ שגיאת FastF1: עמודה חסרה ({e}). לא ניתן לבצע ניתוח עונתי.")
+        return [], f"FastF1: עמודה חסרה ({e}). לא ניתן לבצע ניתוח עונתי."
+    
+    
+    if potential_races.empty:
+        # Fallback אם לא נמצאו אירועים לפני המרוץ
+        return [], f"אין מרוצים רגילים קודמים בלוח הזמנים של {current_year} טרם מרוץ {event}."
+    
+    race_reports = []
+    
+    for _, race in potential_races.iterrows():
+        event_name = race['EventName']
+        st.info(f"🔮 מנתח קונטקסט עונתי: טוען נתוני מרוץ {event_name} {current_year}...")
+        
+        # ננסה לטעון נתונים (Load) - אם הטעינה נכשלת, load_and_process_data יחזיר None
+        context_data, session_name = load_and_process_data(current_year, event_name, 'R')
+        
+        if context_data:
+            report = (
+                f"--- דוח קצב: מרוץ {event_name} {current_year} (מרוץ עונתי) ---\n"
+                f"{context_data}\n"
+            )
+            race_reports.append(report)
+        else:
+            # אם ה-load_and_process_data נכשל, אנחנו מתעלמים מהמרוץ הזה וממשיכים הלאה
+            st.warning(f"⚠️ לא ניתן היה לטעון נתוני מרוץ מלאים עבור {event_name} (FastF1 Load Error).")
+
+    if not race_reports:
+        return [], f"לא נמצאו נתונים מלאים לאף אחד מ-3 המרוצים הקודמים ב-{current_year}."
+    
+    return race_reports, "נתונים עונתיים נטענו"
+
+
 def create_prediction_prompt(context_data, year, event, session_name):
     """בניית הפרומפט המלא למודל Gemini עבור נתונים עכשוויים."""
     
@@ -149,87 +229,6 @@ Based on: Specific Session Data ({session_name} Combined)
 """
     return prompt
 
-@retry(wait=wait_exponential(multiplier=1, min=2, max=10), stop=stop_after_attempt(3))
-def get_gemini_prediction(prompt):
-    """שולח את הפרומפט ל-Gemini Flash ומשתמש במפתח מה-Secrets."""
-    
-    try:
-        api_key = st.secrets.get("GEMINI_API_KEY")
-        if not api_key:
-             raise ValueError("GEMINI_API_KEY לא נמצא ב-Streamlit Secrets. אנא הגדר אותו.")
-    except Exception as e:
-        raise ValueError(f"שגיאת API Key: {e}")
-        
-    client = genai.Client(api_key=api_key)
-    response = client.models.generate_content(
-        model=MODEL_NAME,
-        contents=prompt
-    )
-    return response.text
-
-# --- פונקציות לתחזית מוקדמת (Pre-Race) ---
-
-@st.cache_data(ttl=3600, show_spinner="טוען לוח זמנים F1...")
-def find_last_three_races_data(current_year, event):
-    """מוצא את שלושת המרוצים האחרונים שהתקיימו העונה ומחזיר את נתוני המרוץ שלהם."""
-    
-    try:
-        schedule = fastf1.get_event_schedule(current_year)
-    except Exception:
-        return [], "שגיאה: לא ניתן לטעון את לוח הזמנים של השנה הנוכחית."
-    
-    try:
-        # מנסה למצוא את האינדקס של האירוע הנוכחי
-        event_index = schedule[schedule['EventName'] == event].index[0]
-    except IndexError:
-        # אם האירוע לא נמצא
-        event_index = len(schedule) 
-    
-    # --- טיפול בשגיאת KeyError: 'EventCompleted' והטמעת Fallback ---
-    try:
-        # נבדוק אם העמודה קיימת. אם לא, נתייחס לזה כאל עונה ללא נתונים מושלמים
-        if 'EventCompleted' not in schedule.columns or 'EventFormat' not in schedule.columns:
-            st.warning(f"⚠️ אזהרה: לוח הזמנים של {current_year} אינו מכיל נתוני השלמה מרוץ ('EventCompleted'). לא ניתן לטעון קונטקסט עונתי.")
-            # **FALLBACK:** חוזרים לרשימה ריקה ומאפשרים לתחזית להמשיך על בסיס נתון היסטורי בלבד
-            return [], f"אין נתוני סיום מרוץ זמינים עבור {current_year}."
-
-        # 3. מוצא את 3 המרוצים ה'רגילים' האחרונים שהסתיימו לפני המרוץ הנוכחי
-        completed_races = schedule.loc[
-            (schedule.index < event_index) & 
-            (schedule['EventFormat'] == 'conventional') &
-            (schedule['EventCompleted'] == True)
-        ].sort_index(ascending=False).head(3) 
-
-    except KeyError as e:
-        # לכידת שגיאת KeyError ספציפית
-        st.error(f"❌ שגיאת FastF1: עמודה חסרה ({e}). לא ניתן לבצע ניתוח עונתי.")
-        # **FALLBACK:** חוזרים לרשימה ריקה
-        return [], f"FastF1: עמודה חסרה ({e}). לא ניתן לבצע ניתוח עונתי."
-    
-    
-    if completed_races.empty:
-        # **FALLBACK:** חוזרים לרשימה ריקה אם לא נמצאו מרוצים מלאים, המערכת תמשיך עם הנתון ההיסטורי.
-        return [], f"אין מרוצים מלאים שהתקיימו טרם מרוץ {event} {current_year} לצורך השוואה עונתית."
-    
-    race_reports = []
-    
-    for _, race in completed_races.iterrows():
-        event_name = race['EventName']
-        st.info(f"🔮 מנתח קונטקסט עונתי: טוען נתוני מרוץ {event_name} {current_year}...")
-        
-        context_data, session_name = load_and_process_data(current_year, event_name, 'R')
-        
-        if context_data:
-            report = (
-                f"--- דוח קצב: מרוץ {event_name} {current_year} (מרוץ עונתי) ---\n"
-                f"{context_data}\n"
-            )
-            race_reports.append(report)
-        else:
-            st.warning(f"⚠️ לא ניתן היה לטעון נתוני מרוץ מלאים עבור {event_name} (FastF1 Load Error).")
-
-    return race_reports, "נתונים עונתיים נטענו"
-
 
 def get_preliminary_prediction(current_year, event):
     """משלב נתוני מרוץ מהשנה הקודמת ומשלושת המרוצים האחרונים העונה ליצירת תחזית מוקדמת חזקה יותר."""
@@ -261,6 +260,9 @@ def get_preliminary_prediction(current_year, event):
         based_on_text = f"{event} {previous_year} Race Data & Analysis of the Last {num_races} Races of {current_year}."
     else:
         report_current = f"--- דוח קצב עונתי (אין נתונים עונתיים זמינים) ---\n"
+        # מציג את ההודעה הרלוונטית אם לא נמצאו דוחות עונתיים
+        if status_msg.startswith("לא נמצאו נתונים מלאים"):
+            st.warning(f"⚠️ אזהרה: {status_msg}")
         based_on_text = f"{event} {previous_year} Race Data Only (No Current Season Context)."
 
 

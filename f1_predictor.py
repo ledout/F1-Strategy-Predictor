@@ -6,6 +6,7 @@ import re
 from google import genai
 from google.genai.errors import APIError
 from tenacity import retry, stop_after_attempt, wait_exponential
+import os # ייבוא חדש לשימוש בנתיבים
 
 # --- הגדרות ראשוניות ---
 pd.options.mode.chained_assignment = None
@@ -21,23 +22,35 @@ SESSIONS = ["FP1", "FP2", "FP3", "Q", "S", "R"]
 YEARS = [2025, 2024, 2023, 2022, 2021, 2020]
 MODEL_NAME = "gemini-2.5-flash"
 
-# --- הוספת ניקוי Cache לפני הכל ---
+# --- הגדרת FastF1 Cache ---
+# הגדרת נתיב זמני ל-cache של FastF1 כדי למנוע כשלים סביבתיים
+CACHE_DIR = os.path.join(os.getcwd(), '.fastf1_cache_dir')
+
 try:
-    # מנקה כל Cache קיים כדי לכפות טעינה חדשה של נתונים תקינים.
-    fastf1.Cache.clear_cache(deep=True)
+    if not os.path.exists(CACHE_DIR):
+        os.makedirs(CACHE_DIR)
+    fastf1.Cache.enable_cache(CACHE_DIR)
 except Exception as e:
-    # ממשיכים גם אם הניקוי נכשל (לפעמים FastF1 מציג שגיאה בניקוי Cache ריק)
-    print(f"Cache clear failed (safe to ignore if running first time): {e}")
+    # ממשיכים גם אם ה-Cache נכשל, אך עדיף שזה יעבוד.
+    print(f"FastF1 Cache setup failed: {e}")
 
 # --- פונקציות עזר לטיפול בנתונים ---
 
+# *** דקורטור חדש: שימוש ב-Streamlit Caching ***
+@st.cache_data(ttl=3600, show_spinner="טוען נתוני F1 (בניסיון עקיפת שגיאת load_laps)...")
 def load_and_process_data(year, event, session_key):
-    """טוען נתונים מ-FastF1 ומבצע עיבוד ראשוני."""
+    """טוען נתונים מ-FastF1 ומבצע עיבוד ראשוני, עם Caching של Streamlit."""
+    
+    # ודא שה-cache מנוקה לפני כל טעינה, כפי שניסינו בפתרון הקודם.
+    try:
+        fastf1.Cache.clear_cache(deep=True)
+    except Exception:
+        pass # התעלם מכשל בניקוי cache
+
     try:
         session = fastf1.get_session(year, event, session_key)
         
         # 1. ניסיון טעינת הנתונים
-        # אם ה-Session object לא תקין, השגיאה תיתפס כאן.
         session.load_laps(with_telemetry=False)
         
         # 2. בדיקה: אם אין הקפות, זה כנראה אירוע חסר נתונים
@@ -193,4 +206,35 @@ def main():
         st.subheader(f"🔄 מתחיל ניתוח: {selected_event} {selected_year} ({selected_session})")
         
         status_placeholder = st.empty()
-        status_placeholder.
+        status_placeholder.info("...טוען ומעבד נתונים מ-FastF1 (בניסיון לעקוף את שגיאת load_laps)")
+        
+        # 1. טעינת ועיבוד הנתונים (משתמש ב-st.cache_data)
+        context_data, session_name = load_and_process_data(selected_year, selected_event, selected_session)
+
+        if context_data is None:
+            # הצגת השגיאה שהוחזרה מ-load_and_process_data
+            status_placeholder.error(f"❌ שגיאה: {session_name}")
+            return
+        
+        status_placeholder.success("✅ נתונים עובדו בהצלחה. שולח לניתוח AI...")
+
+        # 2. יצירת הפרומפט וקבלת התחזית
+        try:
+            prompt = create_prediction_prompt(context_data, selected_year, selected_event, selected_session)
+            
+            prediction_report = get_gemini_prediction(prompt)
+
+            status_placeholder.success("🏆 הניתוח הושלם בהצלחה!")
+            st.markdown("---")
+            
+            # 3. הצגת הדו"ח
+            st.markdown(prediction_report)
+
+        except APIError as e:
+            status_placeholder.error(f"❌ שגיאת Gemini API: לא הצליח לקבל תגובה. פרטי שגיאה: {e}")
+        except Exception as e:
+            status_placeholder.error(f"❌ שגיאה בלתי צפויה: {e}")
+
+
+if __name__ == "__main__":
+    main()

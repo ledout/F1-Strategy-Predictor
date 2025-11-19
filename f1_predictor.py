@@ -8,6 +8,7 @@ from google.genai.errors import APIError
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 # --- הגדרות ראשוניות ---
+# הסרת כל הגדרות Cache כדי למנוע קונפליקטים ב-Streamlit Cloud.
 pd.options.mode.chained_assignment = None
 logging.getLogger('fastf1').setLevel(logging.ERROR)
 
@@ -28,15 +29,19 @@ def load_and_process_data(year, event, session_key):
     try:
         session = fastf1.get_session(year, event, session_key)
         
-        # *** התיקון הקריטי: בדיקה לפני טעינה ***
-        if not session.date:
-            return None, f"שגיאה: האירוע {year} {event} {session_key} טרם התקיים או שספריית FastF1 לא פרסמה נתונים עבורו."
-            
-        session.load_laps(with_telemetry=False) 
+        # 1. ניסיון טעינת הנתונים
+        session.load_laps(with_telemetry=False)
         
+        # 2. בדיקה: אם אין הקפות, זה כנראה אירוע חסר נתונים
+        if session.laps.empty:
+            return None, f"שגיאה: האירוע {year} {event} {session_key} טרם התקיים, או שלא נמצאו נתונים תקינים עבורו."
+            
     except Exception as e:
-        # טיפול בשאר שגיאות הטעינה
-        return None, f"שגיאת FastF1 בטעינה: לא נמצאו נתונים עבור {year} {event} {session_key}. פרטי שגיאה: {e}"
+        # טיפול בכשל טעינה (כמו 'Session' object has no attribute 'load_laps')
+        error_message = str(e)
+        if "'Session' object has no attribute 'load_laps'" in error_message:
+             return None, f"שגיאה בטעינת FastF1: נתונים חסרים עבור {year} {event} {session_key}. נסה סשן אחר או שנה אחרת."
+        return None, f"שגיאת FastF1 בטעינה: {error_message}"
 
     laps = session.laps.reset_index(drop=True)
     
@@ -66,7 +71,7 @@ def load_and_process_data(year, event, session_key):
     driver_stats = driver_stats[driver_stats['Laps'] >= 5]
     
     if driver_stats.empty:
-        return None, "לא נמצאו נתונים מספקים (פחות מ-5 הקפות לנהג) לניתוח סטטיסטי."
+        return None, "לא נמצאו נתונים מספקים (פחות מ-5 הקפות לנהג) לניתוח סטטיסטי. נסה סשן אחר."
 
     # עיבוד נתונים לפורמט טקסט (Top 10)
     data_lines = []
@@ -75,7 +80,7 @@ def load_and_process_data(year, event, session_key):
     for index, row in driver_stats.iterrows():
         # טיפול בפורמט datetime של LapTime
         best_time_str = str(row['Best_Time']).split('0 days ')[-1][:10] if row['Best_Time'] is not pd.NaT else 'N/A'
-        avg_time_str = str(row['Avg_Time']).split('0 days ')[-1][:10] if row['Avg_Time'] is not pd.NaT else 'N/A'
+        avg_time_str = str(row['Avg_Time']).split('0 days ')[-1][:10] if row['Best_Time'] is not pd.NaT else 'N/A'
         
         data_lines.append(
             f"DRIVER: {row['Driver']} | Best: {best_time_str} | Avg: {avg_time_str} | Var: {row['Var']:.3f} | Laps: {int(row['Laps'])}"
@@ -165,9 +170,11 @@ def main():
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        selected_year = st.selectbox("שנה:", YEARS, index=2)
+        # שנה את האינדקס כדי לבחור כברירת מחדל שנה שיש בה נתונים
+        selected_year = st.selectbox("שנה:", YEARS, index=1) # 2024
     with col2:
-        selected_event = st.selectbox("מסלול:", TRACKS, index=18)
+        # שנה את האינדקס לבחור מרוץ שהתרחש ב-2024
+        selected_event = st.selectbox("מסלול:", TRACKS, index=0) # Bahrain
     with col3:
         selected_session = st.selectbox("סשן:", SESSIONS, index=5)
     

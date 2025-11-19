@@ -38,7 +38,6 @@ def load_and_process_data(year, event, session_key):
     try:
         session = fastf1.get_session(year, event, session_key)
         # **תיקון V35: הסרת כל הפרמטרים מ-session.load() כדי למנוע שגיאות גרסה**
-        # זה פותר את שגיאת 'unexpected keyword argument' כמו force_ergast.
         session.load() 
         
         # **בדיקת עמידות:** ודא ש-session.laps הוא DataFrame תקף
@@ -103,6 +102,7 @@ def load_and_process_data(year, event, session_key):
 
     return context_data, session.name
 
+# **תיקון V36: סגירת הסוגר החסר ב-decorator של retry**
 @retry(wait=wait_exponential(multiplier=1, min=2, max=10), stop=stop_after_attempt(3))
 def get_gemini_prediction(prompt):
     """שולח את הפרומפט ל-Gemini Flash ומשתמש במפתח מה-Secrets."""
@@ -155,7 +155,6 @@ def find_last_three_races_data(current_year, event, expander_placeholder):
             return [], "דילוג עונתי (מרוץ מוקדם מדי בעונה)."
         
         # 2. סינון מרוצים: רק אירועים שמתכונתם 'conventional' והתאריך שלהם קטן מתאריך המרוץ הנוכחי
-        # **תיקון V33.2: סינון ומיון לפי תאריך האירוע**
         try:
             potential_races = schedule.loc[
                 (schedule['EventFormat'] == 'conventional') &
@@ -287,7 +286,7 @@ def get_preliminary_prediction(current_year, event):
         report_prev = f"--- דוח קצב: {event} מרוץ {previous_year} (אין נתונים היסטוריים זמינים למסלול) ---\n"
         
     if race_reports_current:
-        report_current = "\n".join(race_reports_current)
+        report_current = "\n" + "\n".join(race_reports_current)
         num_races = len(race_reports_current)
         based_on_text = f"{event} {previous_year} Race Data & Analysis of the Last {num_races} Races of {current_year}."
     else:
@@ -297,7 +296,7 @@ def get_preliminary_prediction(current_year, event):
 
     # 4. בניית פרומפט המשלב את כל הדוחות
     
-    full_data_prompt = report_prev + "\n" + report_current
+    full_data_prompt = report_prev + report_current
     
     prompt = f"""
 אתה אנליסט בכיר ב-F1. נתח את הנתונים המשולבים הבאים כדי לספק דוח תחזית מוקדמת (Pre-Race) עבור **מרוץ {event} {current_year}**.
@@ -354,10 +353,11 @@ Based on: {based_on_text}
 def main():
     """פונקציה ראשית המריצה את האפליקציה ב-Streamlit."""
     
-    st.set_page_config(page_title="F1 P1 Predict", layout="centered")
+    st.set_page_config(page_title="F1 Strategy Predictor", layout="centered")
 
-    st.title("🏎️ F1 Strategy Predictor V35")
-    st.markdown("כלי לניתוח אסטרטגיה וחיזוי מנצח מבוסס נתוני FastF1 ו-Gemini AI.")
+    # **תיקון V36: החזרת שם האפליקציה שהגדרת**
+    st.title("🏎️ F1 P1 Predict")
+    st.markdown("An Online data-based strategy analysis and winning prediction tool")
     st.markdown("---")
     
     # בדיקת מפתח API

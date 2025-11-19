@@ -35,9 +35,11 @@ def load_and_process_data(year, event, session_key):
     
     try:
         session = fastf1.get_session(year, event, session_key)
-        session.load(telemetry=False, weather=False, allow_n_attempt=5) 
+        # שימוש ב-ensure_data_loaded=False כדי למנוע קריסה מיידית
+        session.load(telemetry=False, weather=False, allow_n_attempt=5, livedata=False, force_ergast=False) 
         
-        if session.laps is None or session.laps.empty:
+        # **תיקון שיפור עמידות** - ודא ש-session.laps הוא DataFrame תקף
+        if session.laps is None or session.laps.empty or not isinstance(session.laps, pd.DataFrame):
             return None, f"נתונים חסרים עבור {year} {event} {session_key}. ייתכן שמדובר באירוע מבוטל או שטרם התקיים. שגיאה: FastF1 'load_laps' error."
             
     except Exception as e:
@@ -89,7 +91,6 @@ def load_and_process_data(year, event, session_key):
         best_time_str = str(row['Best_Time']).split('0 days ')[-1][:10] if row['Best_Time'] is not pd.NaT else 'N/A'
         avg_time_str = str(row['Avg_Time']).split('0 days ')[-1][:10] if row['Best_Time'] is not pd.NaT else 'N/A'
         
-        # **תיקון: ודא שכל הגרשיים וסוגרי ה-f-string נסגרים כראוי (מטפל בשגיאת שורה 107)**
         data_lines.append(
             f"DRIVER: {row['Driver']} | Best: {best_time_str} | Avg: {avg_time_str} | Var: {row['Var']:.3f} | Laps: {int(row['Laps'])}"
         )
@@ -103,7 +104,6 @@ def create_prediction_prompt(context_data, year, event, session_name):
     
     prompt_data = f"--- נתונים גולמיים לניתוח (Top 10 Drivers, Race/Session Laps) ---\n{context_data}"
 
-    # **תיקון שגיאות 'unterminated string literal' (מטפל בשגיאות שורות 125/128)**
     prompt = f"""
 אתה אנליסט אסטרטגיה בכיר של פורמולה 1. משימתך היא לנתח את הנתונים הסטטיסטיים של הקפות המרוץ 
 ({session_name}, {event} {year}) ולספק דוח אסטרטגי מלא ותחזית מנצח.
@@ -149,12 +149,10 @@ Based on: Specific Session Data ({session_name} Combined)
 """
     return prompt
 
-# **תיקון קריטי: ודא שהסוגריים בדקורטור נסגרים באותה שורה כדי למנוע SyntaxError (מטפל בשגיאת שורה 154)**
 @retry(wait=wait_exponential(multiplier=1, min=2, max=10), stop=stop_after_attempt(3))
 def get_gemini_prediction(prompt):
     """שולח את הפרומפט ל-Gemini Flash ומשתמש במפתח מה-Secrets."""
     
-    # **תיקון: שימוש ב-get() בטוח יותר וטיפול בשגיאת 'expected :' (שורה 159)**
     try:
         api_key = st.secrets.get("GEMINI_API_KEY")
         if not api_key:
@@ -181,16 +179,21 @@ def find_last_three_races_data(current_year, event):
         return [], "שגיאה: לא ניתן לטעון את לוח הזמנים של השנה הנוכחית."
     
     try:
+        # מנסה למצוא את האינדקס של האירוע הנוכחי
         event_index = schedule[schedule['EventName'] == event].index[0]
     except IndexError:
+        # אם האירוע לא נמצא
         event_index = len(schedule) 
     
-    # --- טיפול בשגיאת KeyError: 'EventCompleted' ---
+    # --- טיפול בשגיאת KeyError: 'EventCompleted' והטמעת Fallback ---
     try:
+        # נבדוק אם העמודה קיימת. אם לא, נתייחס לזה כאל עונה ללא נתונים מושלמים
         if 'EventCompleted' not in schedule.columns or 'EventFormat' not in schedule.columns:
             st.warning(f"⚠️ אזהרה: לוח הזמנים של {current_year} אינו מכיל נתוני השלמה מרוץ ('EventCompleted'). לא ניתן לטעון קונטקסט עונתי.")
+            # **FALLBACK:** חוזרים לרשימה ריקה ומאפשרים לתחזית להמשיך על בסיס נתון היסטורי בלבד
             return [], f"אין נתוני סיום מרוץ זמינים עבור {current_year}."
 
+        # 3. מוצא את 3 המרוצים ה'רגילים' האחרונים שהסתיימו לפני המרוץ הנוכחי
         completed_races = schedule.loc[
             (schedule.index < event_index) & 
             (schedule['EventFormat'] == 'conventional') &
@@ -198,11 +201,14 @@ def find_last_three_races_data(current_year, event):
         ].sort_index(ascending=False).head(3) 
 
     except KeyError as e:
-        st.error(f"❌ שגיאת FastF1: עמודה חסרה ({e}). לא ניתן לבצע ניתוח עונתי. אנא בחר שנה שבה הנתונים מלאים יותר.")
+        # לכידת שגיאת KeyError ספציפית
+        st.error(f"❌ שגיאת FastF1: עמודה חסרה ({e}). לא ניתן לבצע ניתוח עונתי.")
+        # **FALLBACK:** חוזרים לרשימה ריקה
         return [], f"FastF1: עמודה חסרה ({e}). לא ניתן לבצע ניתוח עונתי."
     
     
     if completed_races.empty:
+        # **FALLBACK:** חוזרים לרשימה ריקה אם לא נמצאו מרוצים מלאים, המערכת תמשיך עם הנתון ההיסטורי.
         return [], f"אין מרוצים מלאים שהתקיימו טרם מרוץ {event} {current_year} לצורך השוואה עונתית."
     
     race_reports = []
@@ -220,7 +226,7 @@ def find_last_three_races_data(current_year, event):
             )
             race_reports.append(report)
         else:
-            st.warning(f"⚠️ לא ניתן היה לטעון נתוני מרוץ מלאים עבור {event_name}.")
+            st.warning(f"⚠️ לא ניתן היה לטעון נתוני מרוץ מלאים עבור {event_name} (FastF1 Load Error).")
 
     return race_reports, "נתונים עונתיים נטענו"
 
@@ -232,8 +238,11 @@ def get_preliminary_prediction(current_year, event):
     
     st.subheader("🏁 איסוף נתונים לתחזית מוקדמת (Pre-Race Analysis)")
     st.info(f"🔮 מנתח דומיננטיות במסלול: טוען נתוני מרוץ {event} משנה {previous_year}...")
+    
+    # 1. טעינת נתונים היסטוריים (שנה קודמת באותו מסלול)
     context_data_prev, session_name_prev = load_and_process_data(previous_year, event, 'R')
 
+    # 2. טעינת נתונים עונתיים (3 המרוצים האחרונים שהושלמו)
     race_reports_current, status_msg = find_last_three_races_data(current_year, event)
 
     # 3. בדיקת נתונים ואיחוד דוחות
@@ -320,7 +329,7 @@ def main():
     st.markdown("כלי לניתוח אסטרטגיה וחיזוי מנצח מבוסס נתוני FastF1 ו-Gemini AI.")
     st.markdown("---")
     
-    # **תיקון: בדיקת מפתח API בטוחה יותר (מטפל בשגיאת שורה 184)**
+    # בדיקת מפתח API
     try:
         api_key_check = st.secrets.get("GEMINI_API_KEY")
         if not api_key_check:

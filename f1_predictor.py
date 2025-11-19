@@ -153,20 +153,19 @@ def find_last_three_races_data(current_year, event, expander_placeholder):
         try:
             schedule = fastf1.get_event_schedule(current_year)
             if schedule.empty:
-                st.error("שגיאה: לוח הזמנים של השנה הנוכחית ריק.")
-                return [], "שגיאה בטעינת לוח זמנים." # **V43: החזרה תמיד של רשימה ריקה**
+                # V44: מחזיר סטטוס, לא st.error
+                return [], "שגיאה: לוח הזמנים של השנה הנוכחית ריק." 
 
         except Exception as e:
-            st.error(f"שגיאה: לא ניתן לטעון את לוח הזמנים של השנה הנוכחית. {e}")
-            return [], "שגיאה בטעינת לוח זמנים." # **V43: החזרה תמיד של רשימה ריקה**
+            # V44: מחזיר סטטוס, לא st.error
+            return [], f"שגיאה: לא ניתן לטעון את לוח הזמנים של השנה הנוכחית. {e}" 
         
         # 1. מצא את האירוע הנוכחי
         current_event = schedule[schedule['EventName'] == event]
         
         if current_event.empty:
-            # אם האירוע הנוכחי לא נמצא בלוח הזמנים (כי הוא עתידי/לא מלא)
-            st.error(f"❌ לא נמצא בלוח הזמנים המלא. ממשיך עם נתונים היסטוריים בלבד.")
-            return [], "אירוע לא נמצא בלוח הזמנים (אין קונטקסט עונתי)." # **V43: החזרה תמיד של רשימה ריקה**
+            # V44: מחזיר סטטוס (כשל ב-FastF1), לא st.error
+            return [], "❌ לא נמצא בלוח הזמנים המלא. ממשיך עם נתונים היסטוריים בלבד." 
             
         # אם האירוע נמצא, ממשיכים כרגיל:
         current_event_date = current_event['EventDate'].iloc[0]
@@ -175,7 +174,7 @@ def find_last_three_races_data(current_year, event, expander_placeholder):
         # 2. בדיקת סיבוב (Round Number)
         if current_event_round <= 4:
             st.warning(f"⚠️ אזהרה: האירוע הנוכחי ({event}) הוא אחד מ-4 המרוצים הראשונים של העונה. אין מספיק קונטקסט עונתי. מדלג על טעינת 3 המרוצים הקודמים.")
-            return [], "דילוג עונתי (מרוץ מוקדם מדי בעונה)." # **V43: החזרה תמיד של רשימה ריקה**
+            return [], "דילוג עונתי (מרוץ מוקדם מדי בעונה)." 
         
         # 3. סינון מרוצים (קיצור הדרך ל-3 המרוצים האחרונים)
         try:
@@ -184,13 +183,13 @@ def find_last_three_races_data(current_year, event, expander_placeholder):
                 (schedule['EventDate'] < current_event_date)
             ].sort_values(by='EventDate', ascending=False).head(3) 
         except KeyError as e:
-            st.error(f"שגיאת FastF1: עמודה חסרה ({e}). לא ניתן לבצע ניתוח עונתי.")
-            return [], f"FastF1: עמודה חסרה ({e}). לא ניתן לבצע ניתוח עונתי." # **V43: החזרה תמיד של רשימה ריקה**
+            # V44: מחזיר סטטוס
+            return [], f"FastF1: עמודה חסרה ({e}). לא ניתן לבצע ניתוח עונתי."
         
         
         if potential_races.empty:
             st.warning(f"אין מרוצים רגילים קודמים בלוח הזמנים של {current_year} טרם מרוץ {event}.")
-            return [], f"אין מרוצים קודמים ב-{current_year}." # **V43: החזרה תמיד של רשימה ריקה**
+            return [], f"אין מרוצים קודמים ב-{current_year}." 
         
         race_reports = []
         
@@ -213,8 +212,8 @@ def find_last_three_races_data(current_year, event, expander_placeholder):
                 st.warning(f"⚠️ לא ניתן היה לטעון נתוני מרוץ מלאים עבור {event_name}. ה-AI יתעלם מהמרוץ הזה. (שגיאה: {session_name})") 
 
         if not race_reports:
-            st.error(f"לא נמצאו נתונים מלאים לאף אחד מ-3 המרוצים הקודמים ב-{current_year}. הניתוח יתבסס על היסטוריה בלבד.")
-            return [], f"לא נמצאו נתונים עונתיים מלאים ב-{current_year}." # **V43: החזרה תמיד של רשימה ריקה**
+            # V44: מחזיר סטטוס
+            return [], f"לא נמצאו נתונים עונתיים מלאים ב-{current_year}." 
         
         st.success("✅ נתונים עונתיים עובדו בהצלחה. ממשיך ל-AI.")
         return race_reports, "נתונים עונתיים נטענו"
@@ -297,6 +296,12 @@ def get_preliminary_prediction(current_year, event):
         # 2. טעינת נתונים עונתיים (3 המרוצים האחרונים שהושלמו)
         race_reports_current, status_msg = find_last_three_races_data(current_year, event, expander_placeholder)
 
+        # **תיקון V44:** הצגת סטטוס ה-FastF1 רק אם הוחזר כשל קריטי / אזהרה
+        if "❌" in status_msg or "שגיאה" in status_msg or "לא נמצא" in status_msg:
+             st.error(status_msg)
+        elif "אין נתונים עונתיים מלאים" in status_msg or "דילוג עונתי" in status_msg:
+             st.warning(status_msg)
+             
     # 3. בדיקת נתונים ואיחוד דוחות (מחוץ לאקספנדר)
     
     # **V43: אתחול base_on_text**
@@ -383,7 +388,7 @@ Based on: {based_on_text}
 """
     
     try:
-        # **V43: בדיקה סופית וקפדנית לפני קריאה ל-API**
+        # **V43:** בדיקה סופית וקפדנית לפני קריאה ל-API
         if not full_data_prompt:
              raise ValueError("ה-prompt נכשל: אין נתוני בסיס ליצירת הדו\"ח.")
 
@@ -408,7 +413,7 @@ def main():
     try:
         api_key_check = st.secrets.get("GEMINI_API_KEY")
         if not api_key_check:
-            st.error("❌ שגיאה: מפתח ה-API של Gemini לא הוגדר ב-Streamlit Secrets. אנא ודא שהגדרת אותו כראוי.")
+            st.error("❌ שגיאה: מפתח ה-API של Gemini לא הוגדר ב-Streamlit Secrets. אנא הגדר אותו.")
         if not api_key_check:
              st.warning("⚠️ שימו לב: מפתח ה-API לא נמצא. הניתוח יכשל כאשר ינסה להתחבר ל-Gemini.")
 

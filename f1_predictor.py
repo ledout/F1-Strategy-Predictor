@@ -10,7 +10,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 pd.options.mode.chained_assignment = None
 logging.getLogger('fastf1').setLevel(logging.ERROR)
 
-# **כיבוי מוחלט של FastF1 Cache מקומי (פתרון לבעיות רשת/סביבה ב-Streamlit Cloud)**
+# **כיבוי מוחלט של FastF1 Cache מקומי**
 try:
     fastf1.set_cache_path(None)
 except Exception:
@@ -89,7 +89,7 @@ def load_and_process_data(year, event, session_key):
         best_time_str = str(row['Best_Time']).split('0 days ')[-1][:10] if row['Best_Time'] is not pd.NaT else 'N/A'
         avg_time_str = str(row['Avg_Time']).split('0 days ')[-1][:10] if row['Best_Time'] is not pd.NaT else 'N/A'
         
-        # **תיקון: ודא שכל הגרשיים וסוגרי ה-f-string נסגרים כראוי**
+        # **תיקון: ודא שכל הגרשיים וסוגרי ה-f-string נסגרים כראוי (מטפל בשגיאת שורה 107)**
         data_lines.append(
             f"DRIVER: {row['Driver']} | Best: {best_time_str} | Avg: {avg_time_str} | Var: {row['Var']:.3f} | Laps: {int(row['Laps'])}"
         )
@@ -103,8 +103,7 @@ def create_prediction_prompt(context_data, year, event, session_name):
     
     prompt_data = f"--- נתונים גולמיים לניתוח (Top 10 Drivers, Race/Session Laps) ---\n{context_data}"
 
-    # **תיקון שגיאות 'unterminated string literal' בשורות 125/128**
-    # לוודא שאין תווי escape חסרים או גרשיים מיותרים בתוך מחרוזת ה-f-string המשולשת
+    # **תיקון שגיאות 'unterminated string literal' (מטפל בשגיאות שורות 125/128)**
     prompt = f"""
 אתה אנליסט אסטרטגיה בכיר של פורמולה 1. משימתך היא לנתח את הנתונים הסטטיסטיים של הקפות המרוץ 
 ({session_name}, {event} {year}) ולספק דוח אסטרטגי מלא ותחזית מנצח.
@@ -150,19 +149,17 @@ Based on: Specific Session Data ({session_name} Combined)
 """
     return prompt
 
-# **תיקון קריטי: ודא שהסוגריים בדקורטור נסגרים באותה שורה כדי למנוע SyntaxError**
+# **תיקון קריטי: ודא שהסוגריים בדקורטור נסגרים באותה שורה כדי למנוע SyntaxError (מטפל בשגיאת שורה 154)**
 @retry(wait=wait_exponential(multiplier=1, min=2, max=10), stop=stop_after_attempt(3))
 def get_gemini_prediction(prompt):
     """שולח את הפרומפט ל-Gemini Flash ומשתמש במפתח מה-Secrets."""
     
-    # **תיקון שגיאת 'expected :' (line 159) ושיפור הטיפול במפתח API**
+    # **תיקון: שימוש ב-get() בטוח יותר וטיפול בשגיאת 'expected :' (שורה 159)**
     try:
-        # שימוש ב-get() בטוח יותר
         api_key = st.secrets.get("GEMINI_API_KEY")
         if not api_key:
              raise ValueError("GEMINI_API_KEY לא נמצא ב-Streamlit Secrets. אנא הגדר אותו.")
     except Exception as e:
-        # מעביר את השגיאה הלאה אם המפתח לא נמצא או אם יש שגיאת סביבה
         raise ValueError(f"שגיאת API Key: {e}")
         
     client = genai.Client(api_key=api_key)
@@ -184,10 +181,8 @@ def find_last_three_races_data(current_year, event):
         return [], "שגיאה: לא ניתן לטעון את לוח הזמנים של השנה הנוכחית."
     
     try:
-        # מנסה למצוא את האינדקס של האירוע הנוכחי
         event_index = schedule[schedule['EventName'] == event].index[0]
     except IndexError:
-        # אם האירוע לא נמצא (למשל, עדיין לא נוסף ללוח הזמנים של FastF1)
         event_index = len(schedule) 
     
     # --- טיפול בשגיאת KeyError: 'EventCompleted' ---
@@ -196,7 +191,6 @@ def find_last_three_races_data(current_year, event):
             st.warning(f"⚠️ אזהרה: לוח הזמנים של {current_year} אינו מכיל נתוני השלמה מרוץ ('EventCompleted'). לא ניתן לטעון קונטקסט עונתי.")
             return [], f"אין נתוני סיום מרוץ זמינים עבור {current_year}."
 
-        # 3. מוצא את 3 המרוצים ה'רגילים' האחרונים שהסתיימו לפני המרוץ הנוכחי
         completed_races = schedule.loc[
             (schedule.index < event_index) & 
             (schedule['EventFormat'] == 'conventional') &
@@ -204,7 +198,6 @@ def find_last_three_races_data(current_year, event):
         ].sort_index(ascending=False).head(3) 
 
     except KeyError as e:
-        # לכידת שגיאת KeyError ספציפית הנובעת מעמודה חסרה
         st.error(f"❌ שגיאת FastF1: עמודה חסרה ({e}). לא ניתן לבצע ניתוח עונתי. אנא בחר שנה שבה הנתונים מלאים יותר.")
         return [], f"FastF1: עמודה חסרה ({e}). לא ניתן לבצע ניתוח עונתי."
     
@@ -242,3 +235,164 @@ def get_preliminary_prediction(current_year, event):
     context_data_prev, session_name_prev = load_and_process_data(previous_year, event, 'R')
 
     race_reports_current, status_msg = find_last_three_races_data(current_year, event)
+
+    # 3. בדיקת נתונים ואיחוד דוחות
+    if context_data_prev:
+        report_prev = (
+            f"--- דוח קצב: {event} מרוץ {previous_year} (קונטקסט מסלול היסטורי) ---\n"
+            f"הדוח מתאר את ביצועי הנהגים במסלול הספציפי {event} בשנה הקודמת. השווה קצב ממוצע ו-Var:\n"
+            f"{context_data_prev}\n"
+        )
+    else:
+        report_prev = f"--- דוח קצב: {event} מרוץ {previous_year} (אין נתונים היסטוריים זמינים למסלול) ---\n"
+        
+    if race_reports_current:
+        report_current = "\n".join(race_reports_current)
+        num_races = len(race_reports_current)
+        based_on_text = f"{event} {previous_year} Race Data & Analysis of the Last {num_races} Races of {current_year}."
+    else:
+        report_current = f"--- דוח קצב עונתי (אין נתונים עונתיים זמינים) ---\n"
+        based_on_text = f"{event} {previous_year} Race Data Only (No Current Season Context)."
+
+
+    # 4. בניית פרומפט המשלב את כל הדוחות באמצעות f-string משולש 
+    
+    full_data_prompt = report_prev + "\n" + report_current
+    
+    prompt = f"""
+אתה אנליסט בכיר ב-F1. נתח את הנתונים המשולבים הבאים כדי לספק דוח תחזית מוקדמת (Pre-Race) עבור **מרוץ {event} {current_year}**.
+
+{full_data_prompt}
+
+--- הנחיות לניתוח (V33 - שילוב היסטוריה וקונטקסט רחב) ---
+1. **Immediate Prediction (Executive Summary):** בחר מנצח אחד והצג את הנימוק העיקרי (קצב ממוצע, עקביות או מגמה עונתית) בשורה אחת, **באנגלית בלבד**. (חובה)
+2. **Past Performance Analysis:** נתח את הדו\"ח ההיסטורי (שנה קודמת במסלול זה). הסבר מי היה דומיננטי מבחינת קצב ועקביות במסלול זה.
+3. **Current Season Trend Analysis:** נתח את דוחות המרוצים העונתיים. **בצע סיכום קצר של מגמת יחסי הכוחות בין הקבוצות המובילות (Red Bull, Ferrari, Mercedes) ב-3 המרוצים האחרונים.** מי נמצא במגמת שיפור ומי בירידה?
+4. **Strategic Conclusions and Winner Justification:** הצדק את בחירת המנצח על בסיס שילוב של **דומיננטיות קודמת במסלול** (מ-2024/3) ו**יכולת עונתית עדכנית** (מגמת 3 המרוצים האחרונים). עדיפות לנהג עם שילוב של חוזק היסטורי ומגמת שיפור עונתית.
+5. **אסטרטגיה מומלצת:** נתח את הנתונים וספק **אסטרטגיית צמיגים** מומלצת למרוץ הקרוב (לדוגמה: Hard-Medium-Hard) וניתוח **Pit-Stop Window**.
+6. **Confidence Score Table (D5):** ספק טבלת Confidence Score (בפורמט Markdown) המכילה את 5 המועמדים המובילים עם אחוז ביטחון (סך כל האחוזים חייב להיות 100%). **תקן את פורמט הטבלה כך שיופיע תקין ב-Markdown**.
+
+--- פורמט פלט חובה (Markdown, עברית למעט הכותרת הראשית) ---
+🔮 Pre-Race Strategy Report: {event} {current_year}
+
+Based on: {based_on_text}
+
+## Immediate Prediction (Executive Summary)
+...
+
+## Past Performance Analysis
+...
+
+## Current Season Trend Analysis
+...
+
+## Strategic Conclusions and Winner Justification
+...
+
+## 🏎️ Recommended Strategy & Pit-Stop Window
+...
+
+## 📊 Confidence Score Table (D5 - Visual Data)
+| Driver | Confidence Score (%) |
+|:--- | :--- |
+| ... | ... |
+| ... | ... |
+| ... | ... |
+| ... | ... |
+| ... | ... |
+"""
+    
+    try:
+        report = get_gemini_prediction(prompt)
+        return report
+    except Exception as e:
+        st.error(f"❌ שגיאה ב-Gemini API במהלך יצירת תחזית מוקדמת: {e}")
+        return None
+
+# --- פונקציה ראשית של Streamlit ---
+
+def main():
+    """פונקציה ראשית המריצה את האפליקציה ב-Streamlit."""
+    
+    st.set_page_config(page_title="F1 P1 Predict", layout="centered")
+
+    st.title("🏎️ F1 Strategy Predictor V33")
+    st.markdown("כלי לניתוח אסטרטגיה וחיזוי מנצח מבוסס נתוני FastF1 ו-Gemini AI.")
+    st.markdown("---")
+    
+    # **תיקון: בדיקת מפתח API בטוחה יותר (מטפל בשגיאת שורה 184)**
+    try:
+        api_key_check = st.secrets.get("GEMINI_API_KEY")
+        if not api_key_check:
+            st.error("❌ שגיאה: מפתח ה-API של Gemini לא הוגדר ב-Streamlit Secrets. אנא ודא שהגדרת אותו כראוי.")
+        if not api_key_check:
+            st.warning("⚠️ שימו לב: מפתח ה-API לא נמצא. הניתוח יכשל כאשר ינסה להתחבר ל-Gemini.")
+
+    except Exception:
+        st.error("❌ שגיאה: כשל בקריאת מפתח API. ודא שהגדרת אותו כראוי ב-Secrets.")
+        
+    st.markdown("---")
+
+    # בחירת פרמטרים 
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        selected_year = st.selectbox("שנה:", YEARS, index=2, key="select_year") 
+    with col2:
+        selected_event = st.selectbox("מסלול:", TRACKS, index=5, key="select_event") 
+    with col3:
+        selected_session = st.selectbox("סשן:", SESSIONS, index=5, key="select_session")
+    
+    st.markdown("---")
+    
+    # 1. כפתור ניתוח נתונים קיימים
+    if st.button("🏎️ חזה את המנצח (נתוני סשן נוכחי)", use_container_width=True, type="primary"):
+        
+        st.subheader(f"🔄 מתחיל ניתוח: {selected_event} {selected_year} ({selected_session})")
+        
+        status_placeholder = st.empty()
+        status_placeholder.info("...טוען ומעבד נתונים מ-FastF1 (מנסה לעקוף בעיות חיבור/קאש)")
+        
+        # טעינת ועיבוד הנתונים 
+        context_data, status_msg = load_and_process_data(selected_year, selected_event, selected_session)
+
+        if context_data is None:
+            status_placeholder.error(f"❌ שגיאה: {status_msg}")
+            return
+        
+        status_placeholder.success("✅ נתונים עובדו בהצלחה. שולח לניתוח AI...")
+
+        # יצירת הפרומפט וקבלת התחזית
+        try:
+            prompt = create_prediction_prompt(context_data, selected_year, selected_event, selected_session)
+            
+            prediction_report = get_gemini_prediction(prompt)
+
+            status_placeholder.success("🏆 הניתוח הושלם בהצלחה!")
+            st.markdown("---")
+            
+            # הצגת הדו"ח
+            st.markdown(prediction_report)
+
+        except APIError as e:
+            status_placeholder.error(f"❌ שגיאת Gemini API: לא הצליח לקבל תגובה. פרטי שגיאה: {e}")
+        except ValueError as e: # לכידת שגיאות API Key מ-get_gemini_prediction
+            status_placeholder.error(f"❌ שגיאה קריטית: {e}")
+        except Exception as e:
+            status_placeholder.error(f"❌ שגיאה בלתי צפויה: {e}")
+
+    st.markdown("---")
+    
+    # 2. כפתור תחזית מוקדמת (Pre-Race Prediction)
+    if st.button("🔮 תחזית מוקדמת (שילוב עבר וקונטקסט עונתי)", use_container_width=True, type="secondary"):
+        st.subheader(f"🔮 מתחיל תחזית מוקדמת: {selected_event} {selected_year}")
+        
+        prelim_report = get_preliminary_prediction(selected_year, selected_event)
+        
+        if prelim_report:
+            st.markdown("---")
+            st.markdown(prelim_report)
+
+
+if __name__ == "__main__":
+    main()

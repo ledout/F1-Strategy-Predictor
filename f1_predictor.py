@@ -38,8 +38,9 @@ def load_and_process_data(year, event, session_key):
     try:
         session = fastf1.get_session(year, event, session_key)
         
-        # **בדיקה קריטית 1: כשל מוקדם בטעינת Event**
+        # **בדיקה קריטית 1: כשל מוקדם בטעינת Event (תיקון FastF1)**
         if session.event is None:
+             # אם הנתונים לא נטענו, session.event יהיה None, וזו הסיבה לשגיאה הקודמת
              return None, f"שגיאה בטעינת FastF1: לא נמצאו נתוני לוח זמנים עבור {year} {event}. נסה סשן אחר או שנה אחרת."
 
         # 1. ניסיון טעינת ההקפות
@@ -53,7 +54,7 @@ def load_and_process_data(year, event, session_key):
         # טיפול בכשל טעינה (כולל 'load_laps', 'schedule data', ושגיאות רשת)
         error_message = str(e)
         
-        # שינוי זה מטפל בשתי השגיאות הנפוצות של FastF1 במקרה של נתונים חסרים/בעיית רשת
+        # טיפול בשגיאות FastF1 נפוצות
         if "load_laps" in error_message or "schedule data" in error_message or "not found" in error_message:
              return None, f"שגיאה בטעינת FastF1: נתונים חסרים עבור {year} {event} {session_key}. נסה סשן אחר או שנה אחרת."
         
@@ -114,6 +115,7 @@ def create_prediction_prompt(context_data, year, event, session_name):
     prompt_data = f"--- נתונים גולמיים לניתוח (Top 10 Drivers, Race/Session Laps) ---\n{context_data}"
 
     # 2. בניית הפרומפט המלא 
+    # **תיקון: החלפתי את הגרשיים הבודדים בטקסט לגרשיים כפולים כדי למנוע SyntaxError בשורה 125**
     prompt = (
         "אתה אנליסט אסטרטגיה בכיר של פורמולה 1. משימתך היא לנתח את הנתונים הסטטיסטיים של הקפות המרוץ "
         f"({session_name}, {event} {year}) ולספק דוח אסטרטגי מלא ותחזית מנצח.\n\n"
@@ -122,4 +124,24 @@ def create_prediction_prompt(context_data, year, event, session_name):
         "1. **Immediate Prediction (Executive Summary):** בחר מנצח אחד והצג את הנימוק העיקרי (קצב ממוצע או קונסיסטנטיות) בשורה אחת, **באנגלית בלבד**. (חובה)\n"
         "2. **Overall Performance Summary:** נתח את הקצב הממוצע (Avg Time) והעקביות (Var). Var < 1.0 נחשב לעקביות מעולה. Var > 5.0 עשוי להצביע על חוסר קונסיסטנטיות או הפרעות במרוץ (כגון תאונה או דגל אדום).\n"
         "3. **Tire and Strategy Deep Dive:** נתח את הנתונים ביחס למסלול (למשל, מקסיקו=גובה רב, מונזה=מהירות גבוהה). הסבר איזה סוג הגדרה (High Downforce/Low Downforce) משתקף בנתונים, בהנחה שנתון ה-Max Speed של הנהגים המובילים זמין בניתוח שלך.\n"
-        "4. **Weather/Track Influence:** הוסף קונטקסט כללי על תנאי המסלול והשפעתם על הצמיגים. הנח תנאים יציבים וחמים אלא אם כן ה-Var
+        "4. **Weather/Track Influence:** הוסף קונטקסט כללי על תנאי המסלול והשפעתם על הצמיגים. הנח תנאים יציבים וחמים אלא אם כן ה-Var הגבוה מעיד על שימוש בצמיגי גשם/אינטר.\n" 
+        "5. **Strategic Conclusions and Winner Justification:** הצג סיכום והצדקה ברורה לבחירת המנצח על בסיס נתונים ושיקולים אסטרטגיים.\n"
+        "6. **Confidence Score Table (D5):** ספק טבלת Confidence Score (בפורמט Markdown) המכילה את 5 המועמדים המובילים עם אחוז ביטחון (סך כל האחוזים חייב להיות 100%). **תקן את פורמט הטבלה כך שיופיע תקין ב-Markdown**.\n\n"
+        
+        "--- פורמט פלט חובה (Markdown, עברית למעט הכותרת הראשית) ---\n"
+        f"🏎️ Strategy Report: {event} {year}\n\n"
+        f"Based on: Specific Session Data ({session_name} Combined)\n\n"
+        "Immediate Prediction (Executive Summary)\n"
+        "...\n\n"
+        "Overall Performance Summary\n"
+        "...\n\n"
+        "Tire and Strategy Deep Dive\n"
+        "...\n\n"
+        "Weather/Track Influence\n"
+        "...\n\n"
+        "Strategic Conclusions and Winner Justification\n"
+        "...\n\n"
+        "📊 Confidence Score Table (D5 - Visual Data)\n"
+        "| Driver | Confidence Score (%) |\n"
+        "|:--- | :--- |\n"
+        "...\

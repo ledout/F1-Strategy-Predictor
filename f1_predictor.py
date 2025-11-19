@@ -41,7 +41,6 @@ def load_and_process_data(year, event, session_key):
         
         # 2. ניסיון טעינת הנתונים
         # משתמש ב-load() לטיפול טוב יותר בנתונים חסרים/בעיות רשת
-        # telemetry=False ו-weather=False מונעים טעינת קבצים מיותרים
         session.load(telemetry=False, weather=False) 
         
         # 3. בדיקה: אם אין הקפות, זה כנראה אירוע חסר נתונים
@@ -72,11 +71,14 @@ def load_and_process_data(year, event, session_key):
         (laps['Sector1SessionTime'].notna())
     ].copy()
 
+    # **תיקון TypeError:** יצירת עמודת זמן בשניות עבור חישוב var
+    laps_filtered['LapTime_s'] = laps_filtered['LapTime'].dt.total_seconds()
+    
     # 5. חישוב נתונים סטטיסטיים
     driver_stats = laps_filtered.groupby('Driver').agg(
         Best_Time=('LapTime', 'min'),
         Avg_Time=('LapTime', 'mean'),
-        Var=('LapTime', 'var'),
+        Var=('LapTime_s', 'var'), # <--- משתמשים בזמן בשניות כדי לחשב שונות
         Laps=('LapTime', 'count')
     ).reset_index()
 
@@ -155,7 +157,7 @@ def create_prediction_prompt(context_data, year, event, session_name):
 def get_gemini_prediction(prompt):
     """שולח את הפרומפט ל-Gemini Flash ומשתמש במפתח מה-Secrets."""
     try:
-        # **תיקון: בדיקה והשגת המפתח מ-st.secrets**
+        # **בדיקה והשגת המפתח מ-st.secrets**
         api_key = st.secrets["GEMINI_API_KEY"]
     except KeyError:
         # מעלה שגיאה ברורה אם המפתח לא נמצא ב-Streamlit Secrets
@@ -178,9 +180,9 @@ def main():
     st.markdown("---")
     st.markdown("כלי לניתוח אסטרטגיה וחיזוי מנצח מבוסס נתוני FastF1 ו-Gemini AI.")
     
-    # בדיקת מפתח API (בשרת Streamlit) - **תיקון התחביר בשורה זו!**
+    # בדיקת מפתח API
     try:
-        # **שורה 184 (התיקון): ודא שיש st.secrets**
+        # **התיקון לשגיאת התחביר הקודמת: ודא שיש st.secrets**
         if "GEMINI_API_KEY" not in st.secrets or not st.secrets["GEMINI_API_KEY"]:
             st.error("❌ שגיאה: מפתח ה-API של Gemini לא הוגדר ב-Streamlit Secrets. אנא ודא שהגדרת אותו כראוי.")
             return

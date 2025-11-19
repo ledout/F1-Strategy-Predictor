@@ -119,9 +119,9 @@ def get_gemini_prediction(prompt):
 
 # --- פונקציות לתחזית מוקדמת (Pre-Race) ---
 
-@st.cache_data(ttl=3600, show_spinner="טוען לוח זמנים F1...")
+# **התיקון כאן: הסרנו את @st.cache_data**
 def find_last_three_races_data(current_year, event, expander_placeholder):
-    """מוצא את שלושת המרוצים ה'רגילים' האחרונים שהיו אמורים להתקיים העונה ומחזיר את נתוני המרוץ שלהם."""
+    """מוצא את שלושת המרוצים ה'רגילים' האחרונים שהיו אמורים להתקיים העונה ומחזיר את נתוני המרוץ שלהם. כותב פלט לתוך expander_placeholder."""
     
     with expander_placeholder.container():
         st.info("🔄 מתחיל איסוף נתונים עונתי (3 מרוצים אחרונים)")
@@ -181,6 +181,57 @@ def find_last_three_races_data(current_year, event, expander_placeholder):
         return race_reports, "נתונים עונתיים נטענו"
 
 
+def create_prediction_prompt(context_data, year, event, session_name):
+    """בניית הפרומפט המלא למודל Gemini עבור נתונים עכשוויים."""
+    
+    prompt_data = f"--- נתונים גולמיים לניתוח (Top 10 Drivers, Race/Session Laps) ---\n{context_data}"
+
+    prompt = f"""
+אתה אנליסט אסטרטגיה בכיר של פורמולה 1. משימתך היא לנתח את הנתונים הסטטיסטיים של הקפות המרוץ 
+({session_name}, {event} {year}) ולספק דוח אסטרטגי מלא ותחזית מנצח.
+
+{prompt_data}
+
+--- הנחיות לניתוח (V33 - ניתוח משולב R/Q/S וקונטקסט) ---
+1. **Immediate Prediction (Executive Summary):** בחר מנצח אחד והצג את הנימוק העיקרי (קצב ממוצע או קונסיסטנטיות) בשורה אחת, **באנגלית בלבד**. (חובה)
+2. **Overall Performance Summary:** נתח את הקצב הממוצע (Avg Time) והעקביות (Var). Var < 1.0 נחשב לעקביות מעולה. Var > 5.0 עשוי להצביע על חוסר קונסיסטנטיות או הפרעות במרוץ (כגון תאונה או דגל אדום).
+3. **Tire and Strategy Deep Dive:** נתח את הנתונים ביחס למסלול. הסבר איזה סוג הגדרה ('High Downforce'/'Low Downforce') משתקף בנתונים, בהנחה שנתון ה-Max Speed של הנהגים המובילים זמין בניתוח שלך.
+4. **Weather/Track Influence:** הוסף קונטקסט כללי על תנאי המסלול והשפעתם על הצמיגים. הנח תנאים יציבים וחמים אלא אם כן ה-Var הגבוה מעיד על שימוש בצמיגי גשם/אינטר. 
+5. **Strategic Conclusions and Winner Justification:** הצג סיכום והצדקה ברורה לבחירת המנצח על בסיס נתונים ושיקולים אסטרטגיים.
+6. **Confidence Score Table (D5):** ספק טבלת Confidence Score (בפורמט Markdown) המכילה את 5 המועמדים המובילים עם אחוז ביטחון (סך כל האחוזים חייב להיות 100%). **תקן את פורמט הטבלה כך שיופיע תקין ב-Markdown**.
+
+--- פורמט פלט חובה (Markdown, עברית למעט הכותרת הראשית) ---
+🏎️ Strategy Report: {event} {year}
+
+Based on: Specific Session Data ({session_name} Combined)
+
+## Immediate Prediction (Executive Summary)
+...
+
+## Overall Performance Summary
+...
+
+## Tire and Strategy Deep Dive
+...
+
+## Weather/Track Influence
+...
+
+## Strategic Conclusions and Winner Justification
+...
+
+## 📊 Confidence Score Table (D5 - Visual Data)
+| Driver | Confidence Score (%) |
+|:--- | :--- |
+| ... | ... |
+| ... | ... |
+| ... | ... |
+| ... | ... |
+| ... | ... |
+"""
+    return prompt
+
+
 def get_preliminary_prediction(current_year, event):
     """משלב נתוני מרוץ מהשנה הקודמת ומשלושת המרוצים האחרונים העונה ליצירת תחזית מוקדמת חזקה יותר."""
     
@@ -196,6 +247,7 @@ def get_preliminary_prediction(current_year, event):
              st.info(f"🔮 מנתח דומיננטיות במסלול: טוען נתוני מרוץ {event} משנה {previous_year}...")
             
              # 1. טעינת נתונים היסטוריים (שנה קודמת באותו מסלול)
+             # אין בעיה ב-caching כאן כי load_and_process_data היא פונקציה חיצונית
              context_data_prev, session_name_prev = load_and_process_data(previous_year, event, 'R')
              if context_data_prev:
                  st.success(f"✅ נתוני מרוץ {event} {previous_year} נטענו בהצלחה.")
@@ -206,6 +258,7 @@ def get_preliminary_prediction(current_year, event):
         
         # 2. טעינת נתונים עונתיים (3 המרוצים האחרונים שהושלמו)
         # הפונקציה כותבת את הפלט שלה לתוך האקספנדר דרך ה-expander_placeholder
+        # ** אין Caching על הפונקציה הזו **
         race_reports_current, status_msg = find_last_three_races_data(current_year, event, expander_placeholder)
 
     # 3. בדיקת נתונים ואיחוד דוחות (מחוץ לאקספנדר)

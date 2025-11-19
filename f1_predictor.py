@@ -10,8 +10,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 pd.options.mode.chained_assignment = None
 logging.getLogger('fastf1').setLevel(logging.ERROR)
 
-# **הסרת כל הטיפול הידני ב-Cache של FastF1**
-# כיבוי מוחלט של FastF1 Cache מקומי - מכריח טעינה חדשה דרך הרשת (עם Caching של Streamlit)
+# **כיבוי מוחלט של FastF1 Cache מקומי (פתרון לבעיות רשת/סביבה ב-Streamlit Cloud)**
 try:
     fastf1.set_cache_path(None)
 except Exception:
@@ -153,4 +152,51 @@ def get_gemini_prediction(prompt):
         
     client = genai.Client(api_key=api_key)
     response = client.models.generate_content(
-        model=
+        model=MODEL_NAME,
+        contents=prompt
+    )
+    return response.text
+
+# --- פונקציה ראשית של Streamlit ---
+
+def main():
+    """פונקציה ראשית המריצה את האפליקציה ב-Streamlit."""
+    st.set_page_config(page_title="F1 Strategy Predictor V33", layout="centered")
+
+    st.title("🏎️ F1 Strategy Predictor V33")
+    st.markdown("---")
+    st.markdown("כלי לניתוח אסטרטגיה וחיזוי מנצח מבוסס נתוני FastF1 ו-Gemini AI.")
+    
+    # בדיקת מפתח API (בשרת Streamlit)
+    try:
+        if "GEMINI_API_KEY" not in st.secrets or not st.secrets["GEMINI_API_KEY"]:
+            st.error("❌ שגיאה: מפתח ה-API של Gemini לא הוגדר ב-Streamlit Secrets. אנא ודא שהגדרת אותו כראוי.")
+            return
+
+    except Exception:
+        st.error("❌ שגיאה: כשל בקריאת מפתח API. ודא שהגדרת אותו כראוי ב-Secrets.")
+        return
+
+    st.markdown("---")
+
+    # בחירת פרמטרים
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        selected_year = st.selectbox("שנה:", YEARS, index=1) # 2024
+    with col2:
+        selected_event = st.selectbox("מסלול:", TRACKS, index=0) # Bahrain
+    with col3:
+        selected_session = st.selectbox("סשן:", SESSIONS, index=5)
+    
+    st.markdown("---")
+    
+    # כפתור הפעלה
+    if st.button("🏎️ חזה את המנצח (אוטומטי)", use_container_width=True, type="primary"):
+        
+        st.subheader(f"🔄 מתחיל ניתוח: {selected_event} {selected_year} ({selected_session})")
+        
+        status_placeholder = st.empty()
+        status_placeholder.info("...טוען ומעבד נתונים מ-FastF1 (מנסה לעקוף בעיות חיבור)")
+        
+        # 1. טעינת ועיבוד הנתונים (משתמש ב-

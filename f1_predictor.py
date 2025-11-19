@@ -52,7 +52,8 @@ def load_and_process_data(year, event, session_key):
         if "load_laps" in error_message or "schedule data" in error_message:
              return None, f"שגיאה בטעינת FastF1: נתונים חסרים עבור {year} {event} {session_key}. נסה סשן אחר או שנה אחרת."
         
-        return None, f"שגיאת FastF1 בטעינה: {error_message}"
+        # ודא שכל שגיאה אחרת חוזרת כהודעה כללית
+        return None, f"שגיאת FastF1 כללית בטעינה: {error_message}"
 
     laps = session.laps.reset_index(drop=True)
     

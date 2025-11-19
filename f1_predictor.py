@@ -37,8 +37,8 @@ def load_and_process_data(year, event, session_key):
     
     try:
         session = fastf1.get_session(year, event, session_key)
-        # **תיקון V35: הסרת כל הפרמטרים מ-session.load() כדי למנוע שגיאות גרסה**
-        session.load() 
+        # **תיקון V37 (Session.load): הסרת כל הפרמטרים מ-session.load() שוב, כיוון שיש גרסאות FastF1 שאינן תומכות בפרמטרים אלו (כמו force_ergast או allow_n_attempt)**
+        session.load(telemetry=False, weather=False, messages=False, laps=True, pit_stops=False)
         
         # **בדיקת עמידות:** ודא ש-session.laps הוא DataFrame תקף
         if session.laps is None or session.laps.empty or not isinstance(session.laps, pd.DataFrame):
@@ -52,6 +52,10 @@ def load_and_process_data(year, event, session_key):
         
         if "not found" in error_message or "The data you are trying to access has not been loaded yet" in error_message:
              return None, f"נתונים חסרים עבור {year} {event} {session_key}. ייתכן שמדובר באירוע מבוטל או שטרם התקיים. שגיאה: {error_message.split(':', 1)[-1].strip()}"
+        
+        # לכידת שגיאות ארגומנטים לא צפויים (Unexpected Keyword Arguments) מהתמונות
+        if "unexpected keyword argument" in error_message:
+             return None, f"שגיאת גרסה ב-FastF1: הפונקציה Session.load() קיבלה ארגומנט לא צפוי. (נסה להריץ שוב, FastF1 לפעמים מתקן את עצמו). שגיאה: {error_message}"
 
         return None, f"שגיאת FastF1 כללית בטעינה: {error_message}"
 
@@ -107,7 +111,6 @@ def load_and_process_data(year, event, session_key):
 def get_gemini_prediction(prompt):
     """שולח את הפרומפט ל-Gemini Flash ומשתמש במפתח מה-Secrets."""
     
-    # *** התיקון כאן: ודא שה-try מתחיל בעמודה הנכונה (שורה 159) ***
     try:
         api_key = st.secrets.get("GEMINI_API_KEY")
         if not api_key:
@@ -147,6 +150,7 @@ def find_last_three_races_data(current_year, event, expander_placeholder):
             current_event_date = current_event['EventDate'].iloc[0]
             current_event_round = current_event['RoundNumber'].iloc[0]
         except IndexError:
+            # זו השגיאה שראית בצילומים (קנדה 2024, לא נמצא בלוח הזמנים)
             st.error(f"שגיאה: {event} {current_year} לא נמצא בלוח הזמנים. לא ניתן למצוא תאריך יחוס.")
             return [], "אירוע לא נמצא בלוח הזמנים."
         
@@ -157,6 +161,7 @@ def find_last_three_races_data(current_year, event, expander_placeholder):
         
         # 2. סינון מרוצים: רק אירועים שמתכונתם 'conventional' והתאריך שלהם קטן מתאריך המרוץ הנוכחי
         try:
+            # חשוב גם לבדוק שהמרוץ הסתיים (EventCompleted) - עמודה זו אינה תמיד קיימת, לכן עדיף להסתמך על תאריך (EventDate) שהוא תמיד קיים.
             potential_races = schedule.loc[
                 (schedule['EventFormat'] == 'conventional') &
                 (schedule['EventDate'] < current_event_date)
@@ -307,7 +312,7 @@ def get_preliminary_prediction(current_year, event):
 
 --- הנחיות לניתוח (V33 - שילוב היסטוריה וקונטקסט רחב) ---
 1. **Immediate Prediction (Executive Summary):** בחר מנצח אחד והצג את הנימוק העיקרי (קצב ממוצע, עקביות או מגמה עונתית) בשורה אחת, **באנגלית בלבד**. (חובה)
-2. **Past Performance Analysis:** נתח את הדו"ח ההיסטורי (שנה קודמת במסלול זה). הסבר מי היה דומיננטי מבחינת קצב ועקביות במסלול זה.
+2. **Past Performance Analysis:** נתח את הדו\"ח ההיסטורי (שנה קודמת במסלול זה). הסבר מי היה דומיננטי מבחינת קצב ועקביות במסלול זה.
 3. **Current Season Trend Analysis:** נתח את דוחות המרוצים העונתיים. **בצע סיכום קצר של מגמת יחסי הכוחות בין הקבוצות המובילות (Red Bull, Ferrari, Mercedes) ב-3 המרוצים האחרונים.** מי נמצא במגמת שיפור ומי בירידה?
 4. **Strategic Conclusions and Winner Justification:** הצדק את בחירת המנצח על בסיס שילוב של **דומיננטיות קודמת במסלול** (מ-2024/3) ו**יכולת עונתית עדכנית** (מגמת 3 המרוצים האחרונים). עדיפות לנהג עם שילוב של חוזק היסטורי ומגמת שיפור עונתית.
 5. **אסטרטגיה מומלצת:** נתח את הנתונים וספק **אסטרטגיית צמיגים** מומלצת למרוץ הקרוב (לדוגמה: Hard-Medium-Hard) וניתוח **Pit-Stop Window**.
@@ -364,12 +369,11 @@ def main():
     
     # בדיקת מפתח API
     try:
+        # **תיקון V37 - שגיאת סינטקס בשורה 184**
         api_key_check = st.secrets.get("GEMINI_API_KEY")
         if not api_key_check:
-            # ודא שאין רווחים מיותרים אחרי ה-if
             st.error("❌ שגיאה: מפתח ה-API של Gemini לא הוגדר ב-Streamlit Secrets. אנא ודא שהגדרת אותו כראוי.")
         if not api_key_check:
-             # אם הוא עדיין לא קיים, תן אזהרה נוספת
              st.warning("⚠️ שימו לב: מפתח ה-API לא נמצא. הניתוח יכשל כאשר ינסה להתחבר ל-Gemini.")
 
     except Exception:

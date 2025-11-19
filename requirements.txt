@@ -1,7 +1,7 @@
-streamlit>=1.51.0
+streamlit==1.36.0
 fastf1
 pandas
 google-genai
-tenacity
+tenacity<9.0.0
 
 

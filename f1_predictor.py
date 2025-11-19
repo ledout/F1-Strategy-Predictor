@@ -28,7 +28,6 @@ def load_and_process_data(year, event, session_key):
     """טוען נתונים מ-FastF1 ומבצע עיבוד ראשוני."""
     try:
         session = fastf1.get_session(year, event, session_key)
-        # FastF1 יוריד נתונים בכל פעם מכיוון שה-Cache כבוי, וזה תקין ב-Streamlit Cloud.
         session.load_laps(with_telemetry=False) 
     except Exception as e:
         # זה יכול לקרות אם אין נתונים זמינים (למשל, מרוץ עתידי מדי)
@@ -95,90 +94,4 @@ def create_prediction_prompt(context_data, year, event, session_name):
 
     --- הנחיות לניתוח (V33 - ניתוח משולב R/Q/S וקונטקסט) ---
     1. **Immediate Prediction (Executive Summary):** בחר מנצח אחד והצג את הנימוק העיקרי (קצב ממוצע או קונסיסטנטיות) בשורה אחת, **באנגלית בלבד**. (חובה)
-    2. **Overall Performance Summary:** נתח את הקצב הממוצע (Avg Time) והעקביות (Var). Var < 1.0 נחשב לעקביות מעולה. Var > 5.0 עשוי להצביע על חוסר קונסיסטנטיות או הפרעות במרוץ (כגון תאונה או דגל אדום).
-    3. **Tire and Strategy Deep Dive:** נתח את הנתונים ביחס למסלול (למשל, מקסיקו=גובה רב, מונזה=מהירות גבוהה). הסבר איזה סוג הגדרה (High Downforce/Low Downforce) משתקף בנתונים, בהנחה שנתון ה-Max Speed של הנהגים המובילים זמין בניתוח שלך.
-    4. **Weather/Track Influence:** הוסף קונטקסט כללי על תנאי המסלול והשפעתם על הצמיגים. הנח תנאים יציבים וחמים אלא אם כן ה-Var הגבוה מעיד על שימוש בצמיגי גשם/אינטר.
-    5. **Strategic Conclusions and Winner Justification:** הצג סיכום והצדקה ברורה לבחירת המנצח על בסיס נתונים ושיקולים אסטרטגיים.
-    6. **Confidence Score Table (D5):** ספק טבלת Confidence Score (בפורמט Markdown) המכילה את 5 המועמדים המובילים עם אחוז ביטחון (סך כל האחוזים חייב להיות 100%). **תקן את פורמט הטבלה כך שיופיע תקין ב-Markdown**.
-       
-    --- פורמט פלט חובה (Markdown, עברית למעט הכותרת הראשית) ---
-    🏎️ Strategy Report: {event} {year}
-    
-    Based on: Specific Session Data ({session_name} Combined)
-    
-    Immediate Prediction (Executive Summary)
-    ...
-    
-    Overall Performance Summary
-    ...
-    
-    Tire and Strategy Deep Dive
-    ...
-
-    Weather/Track Influence
-    ...
-    
-    Strategic Conclusions and Winner Justification
-    ...
-
-    📊 Confidence Score Table (D5 - Visual Data)
-    | Driver | Confidence Score (%) |
-    |:--- | :--- |
-    ...
-    
-    """
-    return prompt
-
-@retry(wait=wait_exponential(multiplier=1, min=2, max=10), stop=stop_after_attempt(3))
-def get_gemini_prediction(prompt):
-    """שולח את הפרומפט ל-Gemini Flash ומשתמש במפתח מה-Secrets."""
-    try:
-        api_key = st.secrets["GEMINI_API_KEY"]
-    except KeyError:
-        raise ValueError("GEMINI_API_KEY לא נמצא ב-Streamlit Secrets. אנא הגדר אותו.")
-        
-    client = genai.Client(api_key=api_key)
-    response = client.models.generate_content(
-        model=MODEL_NAME,
-        contents=prompt
-    )
-    return response.text
-
-# --- פונקציה ראשית של Streamlit ---
-
-def main():
-    """פונקציה ראשית המריצה את האפליקציה ב-Streamlit."""
-    st.set_page_config(page_title="F1 Strategy Predictor V33", layout="centered")
-
-    st.title("🏎️ F1 Strategy Predictor V33")
-    st.markdown("---")
-    # קו זה תוקן כדי לוודא שאין טעות תחביר בגרשיים (")
-    st.markdown("כלי לניתוח אסטרטגיה וחיזוי מנצח מבוסס נתוני FastF1 ו-Gemini AI.")
-    
-    # בדיקת מפתח API (בשרת Streamlit)
-    try:
-        if "GEMINI_API_KEY" not in st.secrets or not st.secrets["GEMINI_API_KEY"]:
-            st.error("❌ שגיאה: מפתח ה-API של Gemini לא הוגדר ב-Streamlit Secrets. אנא ודא שהגדרת אותו כראוי.")
-            return
-
-    except Exception:
-        st.error("❌ שגיאה: כשל בקריאת מפתח API. ודא שהגדרת אותו כראוי ב-Secrets.")
-        return
-
-    st.markdown("---")
-
-    # בחירת פרמטרים
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        selected_year = st.selectbox("שנה:", YEARS, index=2)
-    with col2:
-        selected_event = st.selectbox("מסלול:", TRACKS, index=18)
-    with col3:
-        selected_session = st.selectbox("סשן:", SESSIONS, index=5)
-    
-    st.markdown("---")
-    
-    # כפתור הפעלה
-    if st.button("🏎️ חזה את המנצח (אוטומטי)", use_container_width=True, type="primary"):
-        st.subheader(f"🔄 מתחיל ניתוח: {selected_event} {selected_year} ({
+    2. **Overall Performance Summary:** נתח את

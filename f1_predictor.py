@@ -36,18 +36,13 @@ def load_and_process_data(year, event, session_key):
     """טוען נתונים מ-FastF1 ומבצע עיבוד ראשוני, עם Caching של Streamlit."""
     
     try:
-        # 1. טוען את האירוע ומאמת קיום
-        event_data = fastf1.get_event(year, event)
-        if event_data is None or event_data.empty:
-             return None, f"שגיאה: האירוע '{event}' לשנת {year} לא נמצא בלוח הזמנים של FastF1."
-
-        # 2. טוען את הסשן
+        # 1. טוען את הסשן
         session = fastf1.get_session(year, event, session_key)
         
-        # 3. ניסיון טעינת ההקפות
-        session.load_laps(with_telemetry=False)
+        # 2. ניסיון טעינת הנתונים (שימוש ב-load() לטיפול טוב יותר בנתונים חסרים/בעיות רשת)
+        session.load(telemetry=False, weather=False) 
         
-        # 4. בדיקה: אם אין הקפות, זה כנראה אירוע חסר נתונים
+        # 3. בדיקה: אם אין הקפות, זה כנראה אירוע חסר נתונים
         if session.laps is None or session.laps.empty:
             return None, f"שגיאה: האירוע {year} {event} {session_key} טרם התקיים, או שלא נמצאו נתונים תקינים עבורו."
             
@@ -56,13 +51,15 @@ def load_and_process_data(year, event, session_key):
         error_message = str(e)
         
         if "Failed to load any schedule data" in error_message or "schedule data" in error_message:
-             return None, f"שגיאה בטעינת FastF1: ייתכן שיש בעיית רשת/חיבור. FastF1: {error_message}"
+             return None, f"שגיאה בטעינת FastF1: ייתכן שיש בעיית רשת/חיבור או שהשנה/מסלול לא קיימים. פרטי שגיאה: {error_message}"
         
         if "not found" in error_message:
              return None, f"שגיאה: נתונים חסרים עבור {year} {event} {session_key}. ייתכן שמדובר באירוע מבוטל או שטרם התקיים."
 
-        if "'Session' object has no attribute 'load_laps'" in error_message:
-            return None, f"שגיאה: האירוע {year} {event} {session_key} לא מכיל נתוני הקפות (FastF1 'load_laps' error). נסה סשן אחר."
+        if "'Session' object has no attribute 'load'" in error_message:
+            # במקרה נדיר שגרסת FastF1 ישנה, נחזיר שגיאה.
+            return None, f"שגיאה: גרסת FastF1 אינה תואמת (load() attribute missing). אנא עדכן לגרסה 2.3.0 ומעלה."
+
 
         # ודא שכל שגיאה אחרת חוזרת כהודעה כללית
         return None, f"שגיאת FastF1 כללית בטעינה: {error_message}"
@@ -106,7 +103,7 @@ def load_and_process_data(year, event, session_key):
         best_time_str = str(row['Best_Time']).split('0 days ')[-1][:10] if row['Best_Time'] is not pd.NaT else 'N/A'
         avg_time_str = str(row['Avg_Time']).split('0 days ')[-1][:10] if row['Best_Time'] is not pd.NaT else 'N/A'
         
-        # **תיקון SyntaxError (סגירת סוגריים ו-f-string, שורה 107 משוערת)**
+        # **התיקון לשגיאת הסוגריים נשמר כאן**
         data_lines.append(
             f"DRIVER: {row['Driver']} | Best: {best_time_str} | Avg: {avg_time_str} | Var: {row['Var']:.3f} | Laps: {int(row['Laps'])}"
         )
@@ -125,12 +122,12 @@ def create_prediction_prompt(context_data, year, event, session_name):
     prompt = (
         "אתה אנליסט אסטרטגיה בכיר של פורמולה 1. משימתך היא לנתח את הנתונים הסטטיסטיים של הקפות המרוץ "
         f"({session_name}, {event} {year}) ולספק דוח אסטרטגי מלא ותחזית מנצח.\n\n"
-        # **תיקון SyntaxError: unterminated f-string (שורה 128 משוערת)**
+        # **התיקון לשגיאת ה-f-string (שורה 128 משוערת) נשמר כאן**
         f"{prompt_data}\n\n"
         "--- הנחיות לניתוח (V33 - ניתוח משולב R/Q/S וקונטקסט) ---\n"
         "1. **Immediate Prediction (Executive Summary):** בחר מנצח אחד והצג את הנימוק העיקרי (קצב ממוצע או קונסיסטנטיות) בשורה אחת, **באנגלית בלבד**. (חובה)\n"
         "2. **Overall Performance Summary:** נתח את הקצב הממוצע (Avg Time) והעקביות (Var). Var < 1.0 נחשב לעקביות מעולה. Var > 5.0 עשוי להצביע על חוסר קונסיסטנטיות או הפרעות במרוץ (כגון תאונה או דגל אדום).\n"
-        # **תיקון SyntaxError: גרשיים פנימיים**
+        # **התיקון לשגיאת הגרשיים הפנימיים נשמר כאן**
         "3. **Tire and Strategy Deep Dive:** נתח את הנתונים ביחס למסלול (למשל, מקסיקו=גובה רב, מונזה=מהירות גבוהה). הסבר איזה סוג הגדרה ('High Downforce'/'Low Downforce') משתקף בנתונים, בהנחה שנתון ה-Max Speed של הנהגים המובילים זמין בניתוח שלך.\n"
         "4. **Weather/Track Influence:** הוסף קונטקסט כללי על תנאי המסלול והשפעתם על הצמיגים. הנח תנאים יציבים וחמים אלא אם כן ה-Var הגבוה מעיד על שימוש בצמיגי גשם/אינטר.\n" 
         "5. **Strategic Conclusions and Winner Justification:** הצג סיכום והצדקה ברורה לבחירת המנצח על בסיס נתונים ושיקולים אסטרטגיים.\n"
@@ -159,89 +156,4 @@ def create_prediction_prompt(context_data, year, event, session_name):
 @retry(wait=wait_exponential(multiplier=1, min=2, max=10), stop=stop_after_attempt(3))
 def get_gemini_prediction(prompt):
     """שולח את הפרומפט ל-Gemini Flash ומשתמש במפתח מה-Secrets."""
-    try:
-        api_key = st.secrets["GEMINI_API_KEY"]
-    except KeyError:
-        # מעלה שגיאה ברורה אם המפתח לא נמצא ב-Streamlit Secrets
-        raise ValueError("GEMINI_API_KEY לא נמצא ב-Streamlit Secrets. אנא הגדר אותו.")
-        
-    client = genai.Client(api_key=api_key)
-    response = client.models.generate_content(
-        model=MODEL_NAME,
-        contents=prompt
-    )
-    return response.text
-
-# --- פונקציה ראשית של Streamlit ---
-
-def main():
-    """פונקציה ראשית המריצה את האפליקציה ב-Streamlit."""
-    st.set_page_config(page_title="F1 Strategy Predictor V33", layout="centered")
-
-    st.title("🏎️ F1 Strategy Predictor V33")
-    st.markdown("---")
-    st.markdown("כלי לניתוח אסטרטגיה וחיזוי מנצח מבוסס נתוני FastF1 ו-Gemini AI.")
-    
-    # בדיקת מפתח API (בשרת Streamlit)
-    try:
-        if "GEMINI_API_KEY" not in st.secrets or not st.secrets["GEMINI_API_KEY"]:
-            st.error("❌ שגיאה: מפתח ה-API של Gemini לא הוגדר ב-Streamlit Secrets. אנא ודא שהגדרת אותו כראוי.")
-            return
-
-    except Exception:
-        st.error("❌ שגיאה: כשל בקריאת מפתח API. ודא שהגדרת אותו כראוי ב-Secrets.")
-        return
-
-    st.markdown("---")
-
-    # בחירת פרמטרים 
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        selected_year = st.selectbox("שנה:", YEARS, index=1, key="select_year") # 2024
-    with col2:
-        selected_event = st.selectbox("מסלול:", TRACKS, index=0, key="select_event") # Bahrain
-    with col3:
-        selected_session = st.selectbox("סשן:", SESSIONS, index=5, key="select_session")
-    
-    st.markdown("---")
-    
-    # כפתור הפעלה
-    if st.button("🏎️ חזה את המנצח (אוטומטי)", use_container_width=True, type="primary"):
-        
-        st.subheader(f"🔄 מתחיל ניתוח: {selected_event} {selected_year} ({selected_session})")
-        
-        # מכיל את ההודעות השוטפות ומונע שגיאות תחביר
-        status_placeholder = st.empty()
-        status_placeholder.info("...טוען ומעבד נתונים מ-FastF1 (מנסה לעקוף בעיות חיבור)")
-        
-        # 1. טעינת ועיבוד הנתונים (משתמש ב-st.cache_data)
-        context_data, session_name = load_and_process_data(selected_year, selected_event, selected_session)
-
-        if context_data is None:
-            # הצגת השגיאה שהוחזרה מ-load_and_process_data
-            status_placeholder.error(f"❌ שגיאה: {session_name}")
-            return
-        
-        status_placeholder.success("✅ נתונים עובדו בהצלחה. שולח לניתוח AI...")
-
-        # 2. יצירת הפרומפט וקבלת התחזית
-        try:
-            prompt = create_prediction_prompt(context_data, selected_year, selected_event, selected_session)
-            
-            prediction_report = get_gemini_prediction(prompt)
-
-            status_placeholder.success("🏆 הניתוח הושלם בהצלחה!")
-            st.markdown("---")
-            
-            # 3. הצגת הדו"ח
-            st.markdown(prediction_report)
-
-        except APIError as e:
-            status_placeholder.error(f"❌ שגיאת Gemini API: לא הצליח לקבל תגובה. פרטי שגיאה: {e}")
-        except Exception as e:
-            status_placeholder.error(f"❌ שגיאה בלתי צפויה: {e}")
-
-
-if __name__ == "__main__":
-    main()
+    try

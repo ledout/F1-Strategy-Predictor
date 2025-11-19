@@ -5,7 +5,7 @@ import logging
 from google import genai
 from google.genai.errors import APIError
 from tenacity import retry, stop_after_attempt, wait_exponential
-import io # נדרש עבור לכידת פלט
+import io 
 
 # --- הגדרות ראשוניות ---
 pd.options.mode.chained_assignment = None
@@ -36,11 +36,12 @@ def load_and_process_data(year, event, session_key):
     
     try:
         session = fastf1.get_session(year, event, session_key)
-        session.load(telemetry=False, weather=False, allow_n_attempt=5, livedata=False, force_ergast=False) 
+        # **תיקון: הסרת פרמטרים שאינם נתמכים כדי למנוע שגיאות FastF1**
+        session.load(telemetry=False, weather=False, force_ergast=False) 
         
         # **תיקון שיפור עמידות** - ודא ש-session.laps הוא DataFrame תקף
         if session.laps is None or session.laps.empty or not isinstance(session.laps, pd.DataFrame):
-            return None, f"נתונים חסרים עבור {year} {event} {session_key}. ייתכן שמדובר באירוע מבוטל או שטרם התקיים. שגיאה: FastF1 'load_laps' error."
+            return None, f"נתונים חסרים עבור {year} {event} {session_key}. FastF1 'load_laps' error."
             
     except Exception as e:
         error_message = str(e)
@@ -119,7 +120,7 @@ def get_gemini_prediction(prompt):
 
 # --- פונקציות לתחזית מוקדמת (Pre-Race) ---
 
-# **התיקון כאן: הסרנו את @st.cache_data**
+# **אין Caching על הפונקציה הזו**
 def find_last_three_races_data(current_year, event, expander_placeholder):
     """מוצא את שלושת המרוצים ה'רגילים' האחרונים שהיו אמורים להתקיים העונה ומחזיר את נתוני המרוץ שלהם. כותב פלט לתוך expander_placeholder."""
     
@@ -127,23 +128,30 @@ def find_last_three_races_data(current_year, event, expander_placeholder):
         st.info("🔄 מתחיל איסוף נתונים עונתי (3 מרוצים אחרונים)")
         
         try:
+            # ודא שה-schedule הוא DataFrame תקף
             schedule = fastf1.get_event_schedule(current_year)
-        except Exception:
-            st.error("שגיאה: לא ניתן לטעון את לוח הזמנים של השנה הנוכחית.")
+            if schedule.empty:
+                st.error("שגיאה: לוח הזמנים של השנה הנוכחית ריק.")
+                return [], "שגיאה בטעינת לוח זמנים."
+
+        except Exception as e:
+            st.error(f"שגיאה: לא ניתן לטעון את לוח הזמנים של השנה הנוכחית. {e}")
             return [], "שגיאה בטעינת לוח זמנים."
         
+        # 1. מצא את תאריך המרוץ הנוכחי
         try:
-            event_index = schedule[schedule['EventName'] == event].index[0]
+            current_event_date = schedule[schedule['EventName'] == event]['EventDate'].iloc[0]
         except IndexError:
-            event_index = len(schedule) 
+            st.error(f"שגיאה: {event} {current_year} לא נמצא בלוח הזמנים. לא ניתן למצוא תאריך יחוס.")
+            return [], "אירוע לא נמצא בלוח הזמנים."
         
+        # 2. סינון מרוצים: רק אירועים שמתכונתם 'conventional' והתאריך שלהם קטן מתאריך המרוץ הנוכחי
+        # **התיקון הקריטי: סינון ומיון לפי תאריך האירוע**
         try:
-            # מציאת אירועים רגילים שהיו אמורים להתקיים לפני האירוע הנוכחי
             potential_races = schedule.loc[
-                (schedule.index < event_index) & 
-                (schedule['EventFormat'] == 'conventional')
-            ].sort_index(ascending=False).head(3) 
-
+                (schedule['EventFormat'] == 'conventional') &
+                (schedule['EventDate'] < current_event_date)
+            ].sort_values(by='EventDate', ascending=False).head(3) # מיין לפי תאריך יורד וקח את 3 האחרונים
         except KeyError as e:
             st.error(f"שגיאת FastF1: עמודה חסרה ({e}). לא ניתן לבצע ניתוח עונתי.")
             return [], f"FastF1: עמודה חסרה ({e}). לא ניתן לבצע ניתוח עונתי."
@@ -171,7 +179,7 @@ def find_last_three_races_data(current_year, event, expander_placeholder):
                 st.success(f"✅ נתוני מרוץ {event_name} נטענו בהצלחה.")
             else:
                 # אם ה-load_and_process_data נכשל, מציג אזהרה בתוך האקספנדר
-                st.warning(f"⚠️ לא ניתן היה לטעון נתוני מרוץ מלאים עבור {event_name}. ה-AI יתעלם מהמרוץ הזה.")
+                st.warning(f"⚠️ לא ניתן היה לטעון נתוני מרוץ מלאים עבור {event_name}. ה-AI יתעלם מהמרוץ הזה. (שגיאה: {session_name})") # הוספת פרטי שגיאה לאזהרה
 
         if not race_reports:
             st.error(f"לא נמצאו נתונים מלאים לאף אחד מ-3 המרוצים הקודמים ב-{current_year}. הניתוח יתבסס על היסטוריה בלבד.")
@@ -247,7 +255,6 @@ def get_preliminary_prediction(current_year, event):
              st.info(f"🔮 מנתח דומיננטיות במסלול: טוען נתוני מרוץ {event} משנה {previous_year}...")
             
              # 1. טעינת נתונים היסטוריים (שנה קודמת באותו מסלול)
-             # אין בעיה ב-caching כאן כי load_and_process_data היא פונקציה חיצונית
              context_data_prev, session_name_prev = load_and_process_data(previous_year, event, 'R')
              if context_data_prev:
                  st.success(f"✅ נתוני מרוץ {event} {previous_year} נטענו בהצלחה.")
@@ -257,8 +264,6 @@ def get_preliminary_prediction(current_year, event):
              st.markdown("---")
         
         # 2. טעינת נתונים עונתיים (3 המרוצים האחרונים שהושלמו)
-        # הפונקציה כותבת את הפלט שלה לתוך האקספנדר דרך ה-expander_placeholder
-        # ** אין Caching על הפונקציה הזו **
         race_reports_current, status_msg = find_last_three_races_data(current_year, event, expander_placeholder)
 
     # 3. בדיקת נתונים ואיחוד דוחות (מחוץ לאקספנדר)

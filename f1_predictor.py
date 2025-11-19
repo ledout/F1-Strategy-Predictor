@@ -308,7 +308,8 @@ def get_preliminary_prediction(current_year, event):
     else:
         report_prev = f"--- דוח קצב: {event} מרוץ {previous_year} (אין נתונים היסטוריים זמינים למסלול) ---\n"
         
-    if race_reports_current:
+    # **תיקון V42:** ודא ש-race_reports_current הוא רשימה של מחרוזות בלבד, ולא None או שגיאה
+    if race_reports_current and isinstance(race_reports_current, list):
         report_current = "\n" + "\n".join(race_reports_current)
         num_races = len(race_reports_current)
         based_on_text = f"{event} {previous_year} Race Data & Analysis of the Last {num_races} Races of {current_year}."
@@ -316,6 +317,11 @@ def get_preliminary_prediction(current_year, event):
         # אם אין נתונים עונתיים (בגלל שגיאת תאריך יחוס או מרוץ מוקדם מדי)
         report_current = f"--- דוח קצב עונתי (אין נתונים עונתיים זמינים) ---\n"
         based_on_text = f"Data Based on: {event} {previous_year} Race Data Only (No Current Season Context)."
+        
+    # **תיקון V42:** אם אין בכלל נתונים (לא היסטוריים ולא עונתיים), יש לעצור ולהציג שגיאה
+    if not context_data_prev and not race_reports_current:
+        st.error("❌ לא נמצאו נתונים היסטוריים או עונתיים זמינים. לא ניתן לבצע ניתוח.")
+        return None
 
 
     # 4. בניית פרומפט המשלב את כל הדוחות

@@ -27,8 +27,15 @@ def load_and_process_data(year, event, session_key):
     """טוען נתונים מ-FastF1 ומבצע עיבוד ראשוני."""
     try:
         session = fastf1.get_session(year, event, session_key)
+        
+        # *** התיקון הקריטי: בדיקה לפני טעינה ***
+        if not session.date:
+            return None, f"שגיאה: האירוע {year} {event} {session_key} טרם התקיים או שספריית FastF1 לא פרסמה נתונים עבורו."
+            
         session.load_laps(with_telemetry=False) 
+        
     except Exception as e:
+        # טיפול בשאר שגיאות הטעינה
         return None, f"שגיאת FastF1 בטעינה: לא נמצאו נתונים עבור {year} {event} {session_key}. פרטי שגיאה: {e}"
 
     laps = session.laps.reset_index(drop=True)
@@ -177,6 +184,7 @@ def main():
         context_data, session_name = load_and_process_data(selected_year, selected_event, selected_session)
 
         if context_data is None:
+            # הצגת השגיאה שהוחזרה מ-load_and_process_data
             status_placeholder.error(f"❌ שגיאה: {session_name}")
             return
         

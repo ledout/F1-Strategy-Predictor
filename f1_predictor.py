@@ -180,5 +180,8 @@ def main():
     st.markdown("כלי לניתוח אסטרטגיה וחיזוי מנצח מבוסס נתוני FastF1 ו-Gemini AI.")
     
     # בדיקת מפתח API (בשרת Streamlit)
-    try:
-        if "GEMINI_API_KEY" not in st.
+ try:
+    if "GEMINI_API_KEY" not in st.secrets or not st.secrets["GEMINI_API_KEY"]:
+        st.error("❌ שגיאה: מפתח ה-API של Gemini לא הוגדר ב-Streamlit Secrets. אנא ודא שהגדרת אותו כראוי.")
+        return
+

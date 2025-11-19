@@ -1,7 +1,7 @@
-streamlit
-fastf1
-pandas
-google-genai
-tenacity
+streamlit==1.36.0
+fastf1==2.3.0
+pandas==2.2.2
+google-genai==0.16.0
+tenacity==8.2.3
 
 

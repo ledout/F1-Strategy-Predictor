@@ -199,4 +199,33 @@ def main():
         status_placeholder = st.empty()
         status_placeholder.info("...טוען ומעבד נתונים מ-FastF1 (מנסה לעקוף בעיות חיבור)")
         
-        # 1. טעינת ועיבוד הנתונים (משתמש ב-
+        # 1. טעינת ועיבוד הנתונים (משתמש ב-st.cache_data)
+        context_data, session_name = load_and_process_data(selected_year, selected_event, selected_session)
+
+        if context_data is None:
+            # הצגת השגיאה שהוחזרה מ-load_and_process_data
+            status_placeholder.error(f"❌ שגיאה: {session_name}")
+            return
+        
+        status_placeholder.success("✅ נתונים עובדו בהצלחה. שולח לניתוח AI...")
+
+        # 2. יצירת הפרומפט וקבלת התחזית
+        try:
+            prompt = create_prediction_prompt(context_data, selected_year, selected_event, selected_session)
+            
+            prediction_report = get_gemini_prediction(prompt)
+
+            status_placeholder.success("🏆 הניתוח הושלם בהצלחה!")
+            st.markdown("---")
+            
+            # 3. הצגת הדו"ח
+            st.markdown(prediction_report)
+
+        except APIError as e:
+            status_placeholder.error(f"❌ שגיאת Gemini API: לא הצליח לקבל תגובה. פרטי שגיאה: {e}")
+        except Exception as e:
+            status_placeholder.error(f"❌ שגיאה בלתי צפויה: {e}")
+
+
+if __name__ == "__main__":
+    main()

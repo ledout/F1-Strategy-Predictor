@@ -174,11 +174,11 @@ def get_gemini_prediction(prompt):
 
 def main():
     """פונקציה ראשית המריצה את האפליקציה ב-Streamlit."""
-    st.set_page_config(page_title="F1 Strategy Predictor V33", layout="centered")
+    st.set_page_config(page_title="F1 P1 Predict", layout="centered")
 
     st.title("🏎️ F1 Strategy Predictor V33")
     st.markdown("---")
-    st.markdown("כלי לניתוח אסטרטגיה וחיזוי מנצח מבוסס נתוני FastF1 ו-Gemini AI.")
+    st.markdown("An Online data-based strategy analysis and winning prediction tool")
     
     # בדיקת מפתח API
     try:
@@ -244,3 +244,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

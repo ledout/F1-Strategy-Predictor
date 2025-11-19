@@ -5,13 +5,12 @@ import logging
 from google import genai
 from google.genai.errors import APIError
 from tenacity import retry, stop_after_attempt, wait_exponential
-import os # ייבוא ספריית os לשימוש עתידי
 
 # --- הגדרות ראשוניות ---
 pd.options.mode.chained_assignment = None
 logging.getLogger('fastf1').setLevel(logging.ERROR)
 
-# **כיבוי מוחלט של FastF1 Cache מקומי**
+# **כיבוי מוחלט של FastF1 Cache מקומי (פתרון לבעיות רשת/סביבה ב-Streamlit Cloud)**
 try:
     fastf1.set_cache_path(None)
 except Exception:
@@ -36,7 +35,6 @@ def load_and_process_data(year, event, session_key):
     
     try:
         session = fastf1.get_session(year, event, session_key)
-        # שימוש ב-allow_n_attempt לשיפור יציבות טעינה
         session.load(telemetry=False, weather=False, allow_n_attempt=5) 
         
         if session.laps is None or session.laps.empty:
@@ -105,7 +103,7 @@ def create_prediction_prompt(context_data, year, event, session_name):
     
     prompt_data = f"--- נתונים גולמיים לניתוח (Top 10 Drivers, Race/Session Laps) ---\n{context_data}"
 
-    # 2. בניית הפרומפט המלא באמצעות f-string משולש (פתרון SyntaxError)
+    # 2. בניית הפרומפט המלא באמצעות f-string משולש 
     prompt = f"""
 אתה אנליסט אסטרטגיה בכיר של פורמולה 1. משימתך היא לנתח את הנתונים הסטטיסטיים של הקפות המרוץ 
 ({session_name}, {event} {year}) ולספק דוח אסטרטגי מלא ותחזית מנצח.
@@ -151,4 +149,46 @@ Based on: Specific Session Data ({session_name} Combined)
 """
     return prompt
 
-@retry(wait=wait_exponential(multiplier=1, min=2, max=10),
+# **תיקון: ודא שהסוגריים בדקורטור נסגרים כראוי**
+@retry(wait=wait_exponential(multiplier=1, min=2, max=10), 
+       stop=stop_after_attempt(3))
+def get_gemini_prediction(prompt):
+    """שולח את הפרומפט ל-Gemini Flash ומשתמש במפתח מה-Secrets."""
+    try:
+        # **תיקון: שימוש ב-get() בטוח יותר**
+        api_key = st.secrets.get("GEMINI_API_KEY")
+        if not api_key:
+             raise ValueError("GEMINI_API_KEY לא נמצא ב-Streamlit Secrets. אנא הגדר אותו.")
+    except Exception as e:
+        # מעביר את השגיאה הלאה אם המפתח לא נמצא
+        raise ValueError(f"שגיאת API Key: {e}")
+        
+    client = genai.Client(api_key=api_key)
+    response = client.models.generate_content(
+        model=MODEL_NAME,
+        contents=prompt
+    )
+    return response.text
+
+# --- פונקציות לתחזית מוקדמת (Pre-Race) ---
+
+@st.cache_data(ttl=3600, show_spinner="טוען לוח זמנים F1...")
+def find_last_three_races_data(current_year, event):
+    """מוצא את שלושת המרוצים האחרונים שהתקיימו העונה ומחזיר את נתוני המרוץ שלהם."""
+    
+    try:
+        schedule = fastf1.get_event_schedule(current_year)
+    except Exception:
+        return [], "שגיאה: לא ניתן לטעון את לוח הזמנים של השנה הנוכחית."
+    
+    try:
+        event_index = schedule[schedule['EventName'] == event].index[0]
+    except IndexError:
+        event_index = len(schedule) 
+    
+    # --- טיפול ב-KeyError: 'EventCompleted' ---
+    if 'EventCompleted' not in schedule.columns or 'EventFormat' not in schedule.columns:
+        st.warning(f"⚠️ אזהרה: לוח הזמנים של {current_year} אינו מכיל נתוני השלמה מרוץ ('EventCompleted'). לא ניתן לטעון קונטקסט עונתי.")
+        return [], f"אין נתוני סיום מרוץ זמינים עבור {current_year}."
+
+    # 3. מוצא את 3 המרו

@@ -44,7 +44,6 @@ def load_and_process_data(year, event, session_key):
         
         # 3. בדיקה: אם אין הקפות, זה כנראה אירוע חסר נתונים
         if session.laps is None or session.laps.empty:
-            # הטיפול בשגיאות FastF1 נותן הודעה מותאמת
             return None, f"נתונים חסרים עבור {year} {event} {session_key}. ייתכן שמדובר באירוע מבוטל או שטרם התקיים. שגיאה: FastF1 'load_laps' error."
             
     except Exception as e:
@@ -53,8 +52,8 @@ def load_and_process_data(year, event, session_key):
         if "Failed to load any schedule data" in error_message or "schedule data" in error_message:
              return None, f"FastF1: Failed to load any schedule data. שגיאה בטעינת FastF1: ייתכן שיש בעיית רשת/חיבור או שהשנה/מסלול לא קיימים."
         
-        if "not found" in error_message:
-             return None, f"נתונים חסרים עבור {year} {event} {session_key}. ייתכן שמדובר באירוע מבוטל או שטרם התקיים."
+        if "not found" in error_message or "The data you are trying to access has not been loaded yet" in error_message:
+             return None, f"נתונים חסרים עבור {year} {event} {session_key}. ייתכן שמדובר באירוע מבוטל או שטרם התקיים. שגיאה: {error_message.split(':', 1)[-1].strip()}"
 
         # ודא שכל שגיאה אחרת חוזרת כהודעה כללית
         return None, f"שגיאת FastF1 כללית בטעינה: {error_message}"
@@ -101,7 +100,7 @@ def load_and_process_data(year, event, session_key):
         best_time_str = str(row['Best_Time']).split('0 days ')[-1][:10] if row['Best_Time'] is not pd.NaT else 'N/A'
         avg_time_str = str(row['Avg_Time']).split('0 days ')[-1][:10] if row['Best_Time'] is not pd.NaT else 'N/A'
         
-        # בניית מחרוזת הנתונים
+        # בניית מחרוזת הנתונים - זו השורה שגרמה לשגיאת תחביר 
         data_lines.append(
             f"DRIVER: {row['Driver']} | Best: {best_time_str} | Avg: {avg_time_str} | Var: {row['Var']:.3f} | Laps: {int(row['Laps'])}"
         )
@@ -116,41 +115,50 @@ def create_prediction_prompt(context_data, year, event, session_name):
     
     prompt_data = f"--- נתונים גולמיים לניתוח (Top 10 Drivers, Race/Session Laps) ---\n{context_data}"
 
-    # 2. בניית הפרומפט המלא 
-    prompt = (
-        "אתה אנליסט אסטרטגיה בכיר של פורמולה 1. משימתך היא לנתח את הנתונים הסטטיסטיים של הקפות המרוץ "
-        f"({session_name}, {event} {year}) ולספק דוח אסטרטגי מלא ותחזית מנצח.\n\n"
-        f"{prompt_data}\n\n" 
-        "--- הנחיות לניתוח (V33 - ניתוח משולב R/Q/S וקונטקסט) ---\n"
-        "1. **Immediate Prediction (Executive Summary):** בחר מנצח אחד והצג את הנימוק העיקרי (קצב ממוצע או קונסיסטנטיות) בשורה אחת, **באנגלית בלבד**. (חובה)\n"
-        "2. **Overall Performance Summary:** נתח את הקצב הממוצע (Avg Time) והעקביות (Var). Var < 1.0 נחשב לעקביות מעולה. Var > 5.0 עשוי להצביע על חוסר קונסיסטנטיות או הפרעות במרוץ (כגון תאונה או דגל אדום).\n"
-        "3. **Tire and Strategy Deep Dive:** נתח את הנתונים ביחס למסלול. הסבר איזה סוג הגדרה ('High Downforce'/'Low Downforce') משתקף בנתונים, בהנחה שנתון ה-Max Speed של הנהגים המובילים זמין בניתוח שלך.\n"
-        "4. **Weather/Track Influence:** הוסף קונטקסט כללי על תנאי המסלול והשפעתם על הצמיגים. הנח תנאים יציבים וחמים אלא אם כן ה-Var הגבוה מעיד על שימוש בצמיגי גשם/אינטר.\n" 
-        "5. **Strategic Conclusions and Winner Justification:** הצג סיכום והצדקה ברורה לבחירת המנצח על בסיס נתונים ושיקולים אסטרטגיים.\n"
-        "6. **Confidence Score Table (D5):** ספק טבלת Confidence Score (בפורמט Markdown) המכילה את 5 המועמדים המובילים עם אחוז ביטחון (סך כל האחוזים חייב להיות 100%). **תקן את פורמט הטבלה כך שיופיע תקין ב-Markdown**.\n\n"
-        
-        "--- פורמט פלט חובה (Markdown, עברית למעט הכותרת הראשית) ---\n"
-        f"🏎️ Strategy Report: {event} {year}\n\n"
-        f"Based on: Specific Session Data ({session_name} Combined)\n\n"
-        "## Immediate Prediction (Executive Summary)\n"
-        "...\n\n"
-        "## Overall Performance Summary\n"
-        "...\n\n"
-        "## Tire and Strategy Deep Dive\n"
-        "...\n\n"
-        "## Weather/Track Influence\n"
-        "...\n\n"
-        "## Strategic Conclusions and Winner Justification\n"
-        "...\n\n"
-        "## 📊 Confidence Score Table (D5 - Visual Data)\n"
-        "| Driver | Confidence Score (%) |\n"
-        "|:--- | :--- |\n"
-        "| ... | ... |\n"
-        "| ... | ... |\n"
-        "| ... | ... |\n"
-        "| ... | ... |\n"
-        "| ... | ... |\n"
-    )
+    # 2. בניית הפרומפט המלא באמצעות f-string משולש (תיקון SyntaxError)
+    prompt = f"""
+אתה אנליסט אסטרטגיה בכיר של פורמולה 1. משימתך היא לנתח את הנתונים הסטטיסטיים של הקפות המרוץ 
+({session_name}, {event} {year}) ולספק דוח אסטרטגי מלא ותחזית מנצח.
+
+{prompt_data}
+
+--- הנחיות לניתוח (V33 - ניתוח משולב R/Q/S וקונטקסט) ---
+1. **Immediate Prediction (Executive Summary):** בחר מנצח אחד והצג את הנימוק העיקרי (קצב ממוצע או קונסיסטנטיות) בשורה אחת, **באנגלית בלבד**. (חובה)
+2. **Overall Performance Summary:** נתח את הקצב הממוצע (Avg Time) והעקביות (Var). Var < 1.0 נחשב לעקביות מעולה. Var > 5.0 עשוי להצביע על חוסר קונסיסטנטיות או הפרעות במרוץ (כגון תאונה או דגל אדום).
+3. **Tire and Strategy Deep Dive:** נתח את הנתונים ביחס למסלול. הסבר איזה סוג הגדרה ('High Downforce'/'Low Downforce') משתקף בנתונים, בהנחה שנתון ה-Max Speed של הנהגים המובילים זמין בניתוח שלך.
+4. **Weather/Track Influence:** הוסף קונטקסט כללי על תנאי המסלול והשפעתם על הצמיגים. הנח תנאים יציבים וחמים אלא אם כן ה-Var הגבוה מעיד על שימוש בצמיגי גשם/אינטר. 
+5. **Strategic Conclusions and Winner Justification:** הצג סיכום והצדקה ברורה לבחירת המנצח על בסיס נתונים ושיקולים אסטרטגיים.
+6. **Confidence Score Table (D5):** ספק טבלת Confidence Score (בפורמט Markdown) המכילה את 5 המועמדים המובילים עם אחוז ביטחון (סך כל האחוזים חייב להיות 100%). **תקן את פורמט הטבלה כך שיופיע תקין ב-Markdown**.
+
+--- פורמט פלט חובה (Markdown, עברית למעט הכותרת הראשית) ---
+🏎️ Strategy Report: {event} {year}
+
+Based on: Specific Session Data ({session_name} Combined)
+
+## Immediate Prediction (Executive Summary)
+...
+
+## Overall Performance Summary
+...
+
+## Tire and Strategy Deep Dive
+...
+
+## Weather/Track Influence
+...
+
+## Strategic Conclusions and Winner Justification
+...
+
+## 📊 Confidence Score Table (D5 - Visual Data)
+| Driver | Confidence Score (%) |
+|:--- | :--- |
+| ... | ... |
+| ... | ... |
+| ... | ... |
+| ... | ... |
+| ... | ... |
+"""
     return prompt
 
 @retry(wait=wait_exponential(multiplier=1, min=2, max=10), stop=stop_after_attempt(3))
@@ -260,43 +268,52 @@ def get_preliminary_prediction(current_year, event):
         based_on_text = f"{event} {previous_year} Race Data Only (No Current Season Context)."
 
 
-    # 4. בניית פרומפט המשלב את כל הדוחות
+    # 4. בניית פרומפט המשלב את כל הדוחות באמצעות f-string משולש (תיקון SyntaxError)
     
     full_data_prompt = report_prev + "\n" + report_current
     
-    prompt = (
-        f"אתה אנליסט בכיר ב-F1. נתח את הנתונים המשולבים הבאים כדי לספק דוח תחזית מוקדמת (Pre-Race) עבור **מרוץ {event} {current_year}**.\n\n"
-        f"{full_data_prompt}\n\n"
-        "--- הנחיות לניתוח (V33 - שילוב היסטוריה וקונטקסט רחב) ---\n"
-        "1. **Immediate Prediction (Executive Summary):** בחר מנצח אחד והצג את הנימוק העיקרי (קצב ממוצע, עקביות או מגמה עונתית) בשורה אחת, **באנגלית בלבד**. (חובה)\n"
-        "2. **Past Performance Analysis:** נתח את הדו\"ח ההיסטורי (שנה קודמת במסלול זה). הסבר מי היה דומיננטי מבחינת קצב ועקביות במסלול זה.\n"
-        "3. **Current Season Trend Analysis:** נתח את דוחות המרוצים העונתיים. **בצע סיכום קצר של מגמת יחסי הכוחות בין הקבוצות המובילות (Red Bull, Ferrari, Mercedes) ב-3 המרוצים האחרונים.** מי נמצא במגמת שיפור ומי בירידה?\n"
-        "4. **Strategic Conclusions and Winner Justification:** הצדק את בחירת המנצח על בסיס שילוב של **דומיננטיות קודמת במסלול** (מ-2024) ו**יכולת עונתית עדכנית** (מגמת 3 המרוצים האחרונים). עדיפות לנהג עם שילוב של חוזק היסטורי ומגמת שיפור עונתית.\n"
-        "5. **אסטרטגיה מומלצת:** נתח את הנתונים וספק **אסטרטגיית צמיגים** מומלצת למרוץ הקרוב (לדוגמה: Hard-Medium-Hard) וניתוח **Pit-Stop Window**.\n"
-        "6. **Confidence Score Table (D5):** ספק טבלת Confidence Score (בפורמט Markdown) המכילה את 5 המועמדים המובילים עם אחוז ביטחון (סך כל האחוזים חייב להיות 100%). **תקן את פורמט הטבלה כך שיופיע תקין ב-Markdown**.\n\n"
-        
-        "--- פורמט פלט חובה (Markdown, עברית למעט הכותרת הראשית) ---\n"
-        f"🔮 Pre-Race Strategy Report: {event} {current_year}\n\n"
-        f"Based on: {based_on_text}\n\n"
-        "## Immediate Prediction (Executive Summary)\n"
-        "...\n\n"
-        "## Past Performance Analysis\n"
-        "...\n\n"
-        "## Current Season Trend Analysis\n"
-        "...\n\n"
-        "## Strategic Conclusions and Winner Justification\n"
-        "...\n\n"
-        "## 🏎️ Recommended Strategy & Pit-Stop Window\n"
-        "...\n\n"
-        "## 📊 Confidence Score Table (D5 - Visual Data)\n"
-        "| Driver | Confidence Score (%) |\n"
-        "|:--- | :--- |\n"
-        "| ... | ... |\n"
-        "| ... | ... |\n"
-        "| ... | ... |\n"
-        "| ... | ... |\n"
-        "| ... | ... |\n"
-    )
+    prompt = f"""
+אתה אנליסט בכיר ב-F1. נתח את הנתונים המשולבים הבאים כדי לספק דוח תחזית מוקדמת (Pre-Race) עבור **מרוץ {event} {current_year}**.
+
+{full_data_prompt}
+
+--- הנחיות לניתוח (V33 - שילוב היסטוריה וקונטקסט רחב) ---
+1. **Immediate Prediction (Executive Summary):** בחר מנצח אחד והצג את הנימוק העיקרי (קצב ממוצע, עקביות או מגמה עונתית) בשורה אחת, **באנגלית בלבד**. (חובה)
+2. **Past Performance Analysis:** נתח את הדו\"ח ההיסטורי (שנה קודמת במסלול זה). הסבר מי היה דומיננטי מבחינת קצב ועקביות במסלול זה.
+3. **Current Season Trend Analysis:** נתח את דוחות המרוצים העונתיים. **בצע סיכום קצר של מגמת יחסי הכוחות בין הקבוצות המובילות (Red Bull, Ferrari, Mercedes) ב-3 המרוצים האחרונים.** מי נמצא במגמת שיפור ומי בירידה?
+4. **Strategic Conclusions and Winner Justification:** הצדק את בחירת המנצח על בסיס שילוב של **דומיננטיות קודמת במסלול** (מ-2024/3) ו**יכולת עונתית עדכנית** (מגמת 3 המרוצים האחרונים). עדיפות לנהג עם שילוב של חוזק היסטורי ומגמת שיפור עונתית.
+5. **אסטרטגיה מומלצת:** נתח את הנתונים וספק **אסטרטגיית צמיגים** מומלצת למרוץ הקרוב (לדוגמה: Hard-Medium-Hard) וניתוח **Pit-Stop Window**.
+6. **Confidence Score Table (D5):** ספק טבלת Confidence Score (בפורמט Markdown) המכילה את 5 המועמדים המובילים עם אחוז ביטחון (סך כל האחוזים חייב להיות 100%). **תקן את פורמט הטבלה כך שיופיע תקין ב-Markdown**.
+
+--- פורמט פלט חובה (Markdown, עברית למעט הכותרת הראשית) ---
+🔮 Pre-Race Strategy Report: {event} {current_year}
+
+Based on: {based_on_text}
+
+## Immediate Prediction (Executive Summary)
+...
+
+## Past Performance Analysis
+...
+
+## Current Season Trend Analysis
+...
+
+## Strategic Conclusions and Winner Justification
+...
+
+## 🏎️ Recommended Strategy & Pit-Stop Window
+...
+
+## 📊 Confidence Score Table (D5 - Visual Data)
+| Driver | Confidence Score (%) |
+|:--- | :--- |
+| ... | ... |
+| ... | ... |
+| ... | ... |
+| ... | ... |
+| ... | ... |
+"""
     
     # 5. שליחה ל-Gemini
     try:
@@ -318,7 +335,7 @@ def main():
     st.markdown("---")
     st.markdown("An Online data-based strategy analysis and winning prediction tool")
     
-    # בדיקת מפתח API
+    # בדיקת מפתח API (תיקון SyntaxError)
     try:
         if "GEMINI_API_KEY" not in st.secrets or not st.secrets["GEMINI_API_KEY"]:
             st.error("❌ שגיאה: מפתח ה-API של Gemini לא הוגדר ב-Streamlit Secrets. אנא ודא שהגדרת אותו כראוי.")
@@ -351,11 +368,11 @@ def main():
         status_placeholder.info("...טוען ומעבד נתונים מ-FastF1 (מנסה לעקוף בעיות חיבור/קאש)")
         
         # טעינת ועיבוד הנתונים 
-        context_data, session_name = load_and_process_data(selected_year, selected_event, selected_session)
+        context_data, status_msg = load_and_process_data(selected_year, selected_event, selected_session)
 
         if context_data is None:
             # הצגת השגיאה שהוחזרה מ-load_and_process_data
-            status_placeholder.error(f"❌ שגיאה: {session_name}")
+            status_placeholder.error(f"❌ שגיאה: {status_msg}")
             return
         
         status_placeholder.success("✅ נתונים עובדו בהצלחה. שולח לניתוח AI...")

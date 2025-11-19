@@ -188,6 +188,7 @@ def get_preliminary_prediction(current_year, event):
         return None 
     
     # 2. בניית פרומפט המשלב עבר והווה
+    # **התיקון הקריטי בוצע כאן: סגירת ה-f-string של השורה הראשונה וחיבור עם השורה הבאה**
     prompt = f"אתה אנליסט בכיר ב-F1. נתח את הנתונים הבאים מ**מרוץ {event} {previous_year}**:\n\n--- נתונים מרוץ {previous_year} ---\n{context_data}\n\n"
     prompt += (
         f"בהתבסס על נתוני העבר, ובשים לב לשינויים הכלליים בביצועי קבוצות כמו Red Bull, Ferrari ו-Mercedes "
@@ -233,8 +234,8 @@ def get_preliminary_prediction(current_year, event):
 def main():
     """פונקציה ראשית המריצה את האפליקציה ב-Streamlit."""
     
-    # **עדכון כותרת האפליקציה ושם הלשונית כאן**
-    st.set_page_config(page_title="F1 Predictor: אסטרטגיה מונעת-AI", layout="centered")
+    # **כותרות מעודכנות שלך**
+    st.set_page_config(page_title="F1 P1 Predict", layout="centered")
 
     st.title("🏎️ F1 P1 Predict")
     st.markdown("---")

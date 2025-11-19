@@ -160,15 +160,17 @@ def find_last_three_races_data(current_year, event, expander_placeholder):
             st.error(f"שגיאה: לא ניתן לטעון את לוח הזמנים של השנה הנוכחית. {e}")
             return [], "שגיאה בטעינת לוח זמנים."
         
-        # 1. מצא את תאריך המרוץ הנוכחי ואת מספר הסיבוב שלו
-        try:
-            current_event = schedule[schedule['EventName'] == event]
-            current_event_date = current_event['EventDate'].iloc[0]
-            current_event_round = current_event['RoundNumber'].iloc[0]
-        except IndexError:
-            # **תיקון V40:** אם האירוע הנוכחי לא נמצא (כי הנתונים לא מלאים), אנחנו לא יכולים להשתמש בו כתאריך יחוס.
-            st.error(f"שגיאה: {event} {current_year} לא נמצא בלוח הזמנים המלא. ממשיך עם נתונים היסטוריים בלבד.")
+        # 1. מצא את האירוע הנוכחי (תיקון V41: בדיקה מפורשת של ריקנות במקום try/except)
+        current_event = schedule[schedule['EventName'] == event]
+        
+        if current_event.empty:
+            # אם האירוע הנוכחי לא נמצא בלוח הזמנים (כי הוא עתידי/לא מלא), מדלגים על הקונטקסט העונתי.
+            st.error(f"❌ לא נמצא בלוח הזמנים המלא. ממשיך עם נתונים היסטוריים בלבד.")
             return [], "אירוע לא נמצא בלוח הזמנים (אין קונטקסט עונתי)."
+            
+        # אם האירוע נמצא, ממשיכים כרגיל:
+        current_event_date = current_event['EventDate'].iloc[0]
+        current_event_round = current_event['RoundNumber'].iloc[0]
         
         # 2. בדיקת סיבוב (Round Number)
         if current_event_round <= 4:

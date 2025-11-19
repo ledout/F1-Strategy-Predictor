@@ -166,9 +166,9 @@ def find_last_three_races_data(current_year, event, expander_placeholder):
             current_event_date = current_event['EventDate'].iloc[0]
             current_event_round = current_event['RoundNumber'].iloc[0]
         except IndexError:
-            # זו השגיאה שראית בצילומים (קנדה 2024, לא נמצא בלוח הזמנים)
-            st.error(f"שגיאה: {event} {current_year} לא נמצא בלוח הזמנים. לא ניתן למצוא תאריך יחוס.")
-            return [], "אירוע לא נמצא בלוח הזמנים."
+            # **תיקון V40:** אם האירוע הנוכחי לא נמצא (כי הנתונים לא מלאים), אנחנו לא יכולים להשתמש בו כתאריך יחוס.
+            st.error(f"שגיאה: {event} {current_year} לא נמצא בלוח הזמנים המלא. ממשיך עם נתונים היסטוריים בלבד.")
+            return [], "אירוע לא נמצא בלוח הזמנים (אין קונטקסט עונתי)."
         
         # 2. בדיקת סיבוב (Round Number)
         if current_event_round <= 4:
@@ -176,7 +176,6 @@ def find_last_three_races_data(current_year, event, expander_placeholder):
             return [], "דילוג עונתי (מרוץ מוקדם מדי בעונה)."
         
         # 3. סינון מרוצים: רק אירועים שמתכונתם 'conventional' והתאריך שלהם קטן מתאריך המרוץ הנוכחי
-        # **הסרה סופית של בדיקת EventCompleted עקב אי זמינותו בלוחות זמנים עתידיים**
         try:
             potential_races = schedule.loc[
                 (schedule['EventFormat'] == 'conventional') &
@@ -312,8 +311,9 @@ def get_preliminary_prediction(current_year, event):
         num_races = len(race_reports_current)
         based_on_text = f"{event} {previous_year} Race Data & Analysis of the Last {num_races} Races of {current_year}."
     else:
+        # אם אין נתונים עונתיים (בגלל שגיאת תאריך יחוס או מרוץ מוקדם מדי)
         report_current = f"--- דוח קצב עונתי (אין נתונים עונתיים זמינים) ---\n"
-        based_on_text = f"{event} {previous_year} Race Data Only (No Current Season Context)."
+        based_on_text = f"Data Based on: {event} {previous_year} Race Data Only (No Current Season Context)."
 
 
     # 4. בניית פרומפט המשלב את כל הדוחות
@@ -328,8 +328,8 @@ def get_preliminary_prediction(current_year, event):
 --- הנחיות לניתוח (V33 - שילוב היסטוריה וקונטקסט רחב) ---
 1. **Immediate Prediction (Executive Summary):** בחר מנצח אחד והצג את הנימוק העיקרי (קצב ממוצע, עקביות או מגמה עונתית) בשורה אחת, **באנגלית בלבד**. (חובה)
 2. **Past Performance Analysis:** נתח את הדו\"ח ההיסטורי (שנה קודמת במסלול זה). הסבר מי היה דומיננטי מבחינת קצב ועקביות במסלול זה.
-3. **Current Season Trend Analysis:** נתח את דוחות המרוצים העונתיים. **בצע סיכום קצר של מגמת יחסי הכוחות בין הקבוצות המובילות (Red Bull, Ferrari, Mercedes) ב-3 המרוצים האחרונים.** מי נמצא במגמת שיפור ומי בירידה?
-4. **Strategic Conclusions and Winner Justification:** הצדק את בחירת המנצח על בסיס שילוב של **דומיננטיות קודמת במסלול** (מ-2024/3) ו**יכולת עונתית עדכנית** (מגמת 3 המרוצים האחרונים). עדיפות לנהג עם שילוב של חוזק היסטורי ומגמת שיפור עונתית.
+3. **Current Season Trend Analysis:** נתח את דוחות המרוצים העונתיים. **בצע סיכום קצר של מגמת יחסי הכוחות בין הקבוצות המובילות (Red Bull, Ferrari, Mercedes) ב-3 המרוצים האחרונים.** מי נמצא במגמת שיפור ומי בירידה? אם אין נתונים עונתיים, השתמש בידע כללי על המגמות העונתיות עד כה.
+4. **Strategic Conclusions and Winner Justification:** הצדק את בחירת המנצח על בסיס שילוב של **דומיננטיות קודמת במסלול** (מ-{previous_year}) ו**יכולת עונתית עדכנית** (מגמת 3 המרוצים האחרונים). עדיפות לנהג עם שילוב של חוזק היסטורי ומגמת שיפור עונתית.
 5. **אסטרטגיה מומלצת:** נתח את הנתונים וספק **אסטרטגיית צמיגים** מומלצת למרוץ הקרוב (לדוגמה: Hard-Medium-Hard) וניתוח **Pit-Stop Window**.
 6. **Confidence Score Table (D5):** ספק טבלת Confidence Score (בפורמט Markdown) המכילה את 5 המועמדים המובילים עם אחוז ביטחון (סך כל האחוזים חייב להיות 100%). **תקן את פורמט הטבלה כך שיופיע תקין ב-Markdown**.
 

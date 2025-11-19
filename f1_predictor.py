@@ -31,22 +31,30 @@ MODEL_NAME = "gemini-2.5-flash"
 
 # --- פונקציות עזר לטיפול בנתונים ---
 
-# **תיקון V38: הסרת st.cache_data כדי למנוע UnhashableParamError וניסיונות Load כושלים**
-# @st.cache_data(ttl=3600, show_spinner="טוען נתוני F1 (מכבה FastF1 Cache מקומי)...")
+# ללא Caching של Streamlit
 def load_and_process_data(year, event, session_key):
-    """טוען נתונים מ-FastF1 ומבצע עיבוד ראשוני, ללא Caching של Streamlit."""
+    """טוען נתונים מ-FastF1 ומבצע עיבוד ראשוני, עם טיפול בשגיאות גרסה של session.load()."""
     
     try:
         session = fastf1.get_session(year, event, session_key)
         
-        # **תיקון V38: ניסיון לטעון ללא ארגומנטים (כפי שזה עובד במונקו 2023)**
+        # **תיקון V39: ניסיון Session.load() בסיסי ועמיד לגרסאות FastF1 שונות**
         try:
-            session.load()
+            # 1. ניסיון טעינה בסיסי (אנו רוצים רק הקפות)
+            session.load(laps=True, telemetry=False, weather=False, messages=False, pit_stops=False)
         except TypeError as e:
-            # אם Session.load() נכשל בגלל ארגומנטים לא צפויים (allow_n_attempt, pit_stops)
-            # ננסה שיטה חלופית לטעינה עם טלמטריה כבויה
+            # 2. אם נכשל בגלל ארגומנטים לא צפויים, ננסה טעינה ללא ארגומנטים כלל.
             if "unexpected keyword argument" in str(e):
-                 # טעינה עם דגלים ספציפיים שסביר יותר שיתמכו
+                 # אנו נותנים ל-FastF1 לטעון הכל לבד אם הארגומנטים לא עובדים
+                 session.load()
+            else:
+                 # אם זו שגיאת Type אחרת, זרוק אותה הלאה
+                 raise e 
+        except Exception as e:
+            # שגיאת טעינה כללית - מעבר לדגל מפורש
+            error_message = str(e)
+            if "not loaded yet" in error_message:
+                 # ניסיון טעינה מפורשת אם יש בעיה ב-metadata
                  session.load(telemetry=False, weather=False, messages=False, laps=True, pit_stops=False)
             else:
                  raise e
@@ -116,7 +124,6 @@ def load_and_process_data(year, event, session_key):
 
     return context_data, session.name
 
-# **תיקון V36: סגירת הסוגר החסר ב-decorator של retry**
 @retry(wait=wait_exponential(multiplier=1, min=2, max=10), stop=stop_after_attempt(3))
 def get_gemini_prediction(prompt):
     """שולח את הפרומפט ל-Gemini Flash ומשתמש במפתח מה-Secrets."""
@@ -137,9 +144,8 @@ def get_gemini_prediction(prompt):
 
 # --- פונקציות לתחזית מוקדמת (Pre-Race) ---
 
-# **אין Caching על הפונקציה הזו**
 def find_last_three_races_data(current_year, event, expander_placeholder):
-    """מוצא את שלושת המרוצים ה'רגילים' האחרונים שהיו אמורים להתקיים העונה ומחזיר את נתוני המרוץ שלהם. כותב פלט לתוך expander_placeholder."""
+    """מוצא את שלושת המרוצים ה'רגילים' האחרונים שהיו אמורים להתקיים העונה ומחזיר את נתוני המרוץ שלהם."""
     
     with expander_placeholder.container():
         st.info("🔄 מתחיל איסוף נתונים עונתי (3 מרוצים אחרונים)")
@@ -164,14 +170,14 @@ def find_last_three_races_data(current_year, event, expander_placeholder):
             st.error(f"שגיאה: {event} {current_year} לא נמצא בלוח הזמנים. לא ניתן למצוא תאריך יחוס.")
             return [], "אירוע לא נמצא בלוח הזמנים."
         
-        # **תיקון V34: בדיקת סיבוב (Round Number)** - אם זה אחד מ-4 המרוצים הראשונים, אין מספיק קונטקסט עונתי.
+        # 2. בדיקת סיבוב (Round Number)
         if current_event_round <= 4:
             st.warning(f"⚠️ אזהרה: האירוע הנוכחי ({event}) הוא אחד מ-4 המרוצים הראשונים של העונה. אין מספיק קונטקסט עונתי. מדלג על טעינת 3 המרוצים הקודמים.")
             return [], "דילוג עונתי (מרוץ מוקדם מדי בעונה)."
         
-        # 2. סינון מרוצים: רק אירועים שמתכונתם 'conventional' והתאריך שלהם קטן מתאריך המרוץ הנוכחי
+        # 3. סינון מרוצים: רק אירועים שמתכונתם 'conventional' והתאריך שלהם קטן מתאריך המרוץ הנוכחי
+        # **הסרה סופית של בדיקת EventCompleted עקב אי זמינותו בלוחות זמנים עתידיים**
         try:
-            # **תיקון V38: הסתמכות רק על EventDate ו-EventFormat - מניעת שגיאת EventCompleted**
             potential_races = schedule.loc[
                 (schedule['EventFormat'] == 'conventional') &
                 (schedule['EventDate'] < current_event_date)
@@ -192,7 +198,6 @@ def find_last_three_races_data(current_year, event, expander_placeholder):
             st.info(f"🔮 מנסה לטעון נתוני מרוץ: {event_name} {current_year}...")
             
             # ננסה לטעון נתונים (Load)
-            # שימו לב - לא נשתמש ב-st.cache_data בתוך הלולאה.
             context_data, session_name = load_and_process_data(current_year, event_name, 'R')
             
             if context_data:
@@ -250,7 +255,7 @@ Based on: Specific Session Data ({session_name} Combined)
 ## Weather/Track Influence
 ...
 
-## Strategic Conclusions and Winner Justumification
+## Strategic Conclusions and Winner Justification
 ...
 
 ## 📊 Confidence Score Table (D5 - Visual Data)
@@ -289,7 +294,6 @@ def get_preliminary_prediction(current_year, event):
              st.markdown("---")
         
         # 2. טעינת נתונים עונתיים (3 המרוצים האחרונים שהושלמו)
-        # find_last_three_races_data כבר משתמש ב-expander_placeholder.container()
         race_reports_current, status_msg = find_last_three_races_data(current_year, event, expander_placeholder)
 
     # 3. בדיקת נתונים ואיחוד דוחות (מחוץ לאקספנדר)
@@ -373,14 +377,12 @@ def main():
     
     st.set_page_config(page_title="F1 Strategy Predictor", layout="centered")
 
-    # **תיקון V36: החזרת שם האפליקציה שהגדרת**
     st.title("🏎️ F1 P1 Predict")
     st.markdown("An Online data-based strategy analysis and winning prediction tool")
     st.markdown("---")
     
     # בדיקת מפתח API
     try:
-        # **תיקון V37 - שגיאת סינטקס**
         api_key_check = st.secrets.get("GEMINI_API_KEY")
         if not api_key_check:
             st.error("❌ שגיאה: מפתח ה-API של Gemini לא הוגדר ב-Streamlit Secrets. אנא ודא שהגדרת אותו כראוי.")
@@ -410,7 +412,6 @@ def main():
         st.subheader(f"🔄 מתחיל ניתוח: {selected_event} {selected_year} ({selected_session})")
         
         status_placeholder = st.empty()
-        # **תיקון V38: הסרנו את ה-caching, נשנה את הסטטוס לטעינה רגילה**
         status_placeholder.info("...טוען ומעבד נתונים מ-FastF1...")
         
         # טעינת ועיבוד הנתונים 

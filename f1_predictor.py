@@ -36,34 +36,37 @@ def load_and_process_data(year, event, session_key):
     """טוען נתונים מ-FastF1 ומבצע עיבוד ראשוני, עם Caching של Streamlit."""
     
     try:
+        # **תיקון קריטי: נסה קודם לאמת את קיום האירוע**
+        event_data = fastf1.get_event(year, event)
+        if event_data is None:
+             return None, f"שגיאה: האירוע '{event}' לשנת {year} לא נמצא בלוח הזמנים של FastF1."
+
+        # 1. טוען את הסשן (רק אם האירוע קיים)
         session = fastf1.get_session(year, event, session_key)
         
-        # **בדיקה קריטית 1: כשל מוקדם בטעינת Event (תיקון FastF1)**
-        if session.event is None:
-             return None, f"שגיאה בטעינת FastF1: לא נמצאו נתוני לוח זמנים עבור {year} {event}. נסה סשן אחר או שנה אחרת."
-
-        # 1. ניסיון טעינת ההקפות
+        # 2. ניסיון טעינת ההקפות
         session.load_laps(with_telemetry=False)
         
-        # 2. בדיקה: אם אין הקפות, זה כנראה אירוע חסר נתונים
-        # הוספתי טיפול בשגיאת 'Session' object has no attribute 'load_laps' (שנצפתה בתמונות Las Vegas 2025/2023)
+        # 3. בדיקה: אם אין הקפות, זה כנראה אירוע חסר נתונים
         if session.laps is None or session.laps.empty:
             return None, f"שגיאה: האירוע {year} {event} {session_key} טרם התקיים, או שלא נמצאו נתונים תקינים עבורו."
             
     except Exception as e:
-        # טיפול בכשל טעינה (כולל 'load_laps', 'schedule data', ושגיאות רשת)
+        # טיפול בשגיאות FastF1 נפוצות וכלליות
         error_message = str(e)
         
-        # טיפול בשגיאות FastF1 נפוצות
         if "load_laps" in error_message or "schedule data" in error_message or "not found" in error_message:
-             return None, f"שגיאה בטעינת FastF1: נתונים חסרים עבור {year} {event} {session_key}. נסה סשן אחר או שנה אחרת."
+             return None, f"שגיאה בטעינת FastF1: נתונים חסרים עבור {year} {event} {session_key}. ייתכן שמדובר בבעיית רשת/חיבור."
         
+        if "'Session' object has no attribute 'load_laps'" in error_message:
+            return None, f"שגיאה: האירוע {year} {event} {session_key} לא מכיל נתוני הקפות (FastF1 'load_laps' error). נסה סשן אחר."
+
         # ודא שכל שגיאה אחרת חוזרת כהודעה כללית
         return None, f"שגיאת FastF1 כללית בטעינה: {error_message}"
 
     laps = session.laps.reset_index(drop=True)
     
-    # סינון הקפות נדרש (V33)
+    # סינון הקפות נדרש
     laps_filtered = laps.loc[
         (laps['IsAccurate'] == True) & 
         (laps['LapTime'].notna()) & 
@@ -73,7 +76,7 @@ def load_and_process_data(year, event, session_key):
         (laps['Sector1SessionTime'].notna())
     ].copy()
 
-    # 3. חישוב נתונים סטטיסטיים
+    # 4. חישוב נתונים סטטיסטיים
     driver_stats = laps_filtered.groupby('Driver').agg(
         Best_Time=('LapTime', 'min'),
         Avg_Time=('LapTime', 'mean'),
@@ -115,7 +118,6 @@ def create_prediction_prompt(context_data, year, event, session_name):
     prompt_data = f"--- נתונים גולמיים לניתוח (Top 10 Drivers, Race/Session Laps) ---\n{context_data}"
 
     # 2. בניית הפרומפט המלא 
-    # **הקפדה מחודשת על הסרת גרשים בודדים**
     prompt = (
         "אתה אנליסט אסטרטגיה בכיר של פורמולה 1. משימתך היא לנתח את הנתונים הסטטיסטיים של הקפות המרוץ "
         f"({session_name}, {event} {year}) ולספק דוח אסטרטגי מלא ותחזית מנצח.\n\n"

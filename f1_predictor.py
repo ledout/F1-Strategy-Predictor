@@ -13,7 +13,8 @@ logging.getLogger('fastf1').setLevel(logging.ERROR)
 
 # **כיבוי מוחלט של FastF1 Cache מקומי**
 try:
-    fastf1.set_cache_path(None)
+    # הגדרת Cache Path ל-None מכבה את ה-Cache המקומי של FastF1.
+    fastf1.set_cache_path(None) 
 except Exception:
     pass
 
@@ -36,10 +37,11 @@ def load_and_process_data(year, event, session_key):
     
     try:
         session = fastf1.get_session(year, event, session_key)
-        # **תיקון: הסרת פרמטרים שאינם נתמכים כדי למנוע שגיאות FastF1**
-        session.load(telemetry=False, weather=False, force_ergast=False) 
+        # **תיקון V35: הסרת כל הפרמטרים מ-session.load() כדי למנוע שגיאות גרסה**
+        # זה פותר את שגיאת 'unexpected keyword argument' כמו force_ergast.
+        session.load() 
         
-        # **תיקון שיפור עמידות** - ודא ש-session.laps הוא DataFrame תקף
+        # **בדיקת עמידות:** ודא ש-session.laps הוא DataFrame תקף
         if session.laps is None or session.laps.empty or not isinstance(session.laps, pd.DataFrame):
             return None, f"נתונים חסרים עבור {year} {event} {session_key}. FastF1 'load_laps' error."
             
@@ -79,6 +81,7 @@ def load_and_process_data(year, event, session_key):
     driver_stats['Best_Time_s'] = driver_stats['Best_Time'].dt.total_seconds()
     driver_stats['Avg_Time_s'] = driver_stats['Avg_Time'].dt.total_seconds()
     
+    # נתונים סטטיסטיים רק אם בוצעו 5 הקפות ומעלה
     driver_stats = driver_stats[driver_stats['Laps'] >= 5]
     
     if driver_stats.empty:
@@ -128,7 +131,6 @@ def find_last_three_races_data(current_year, event, expander_placeholder):
         st.info("🔄 מתחיל איסוף נתונים עונתי (3 מרוצים אחרונים)")
         
         try:
-            # ודא שה-schedule הוא DataFrame תקף
             schedule = fastf1.get_event_schedule(current_year)
             if schedule.empty:
                 st.error("שגיאה: לוח הזמנים של השנה הנוכחית ריק.")
@@ -138,15 +140,22 @@ def find_last_three_races_data(current_year, event, expander_placeholder):
             st.error(f"שגיאה: לא ניתן לטעון את לוח הזמנים של השנה הנוכחית. {e}")
             return [], "שגיאה בטעינת לוח זמנים."
         
-        # 1. מצא את תאריך המרוץ הנוכחי
+        # 1. מצא את תאריך המרוץ הנוכחי ואת מספר הסיבוב שלו
         try:
-            current_event_date = schedule[schedule['EventName'] == event]['EventDate'].iloc[0]
+            current_event = schedule[schedule['EventName'] == event]
+            current_event_date = current_event['EventDate'].iloc[0]
+            current_event_round = current_event['RoundNumber'].iloc[0]
         except IndexError:
             st.error(f"שגיאה: {event} {current_year} לא נמצא בלוח הזמנים. לא ניתן למצוא תאריך יחוס.")
             return [], "אירוע לא נמצא בלוח הזמנים."
         
+        # **תיקון V34: בדיקת סיבוב (Round Number)** - אם זה אחד מ-4 המרוצים הראשונים, אין מספיק קונטקסט עונתי.
+        if current_event_round <= 4:
+            st.warning(f"⚠️ אזהרה: האירוע הנוכחי ({event}) הוא אחד מ-4 המרוצים הראשונים של העונה. אין מספיק קונטקסט עונתי. מדלג על טעינת 3 המרוצים הקודמים.")
+            return [], "דילוג עונתי (מרוץ מוקדם מדי בעונה)."
+        
         # 2. סינון מרוצים: רק אירועים שמתכונתם 'conventional' והתאריך שלהם קטן מתאריך המרוץ הנוכחי
-        # **התיקון הקריטי: סינון ומיון לפי תאריך האירוע**
+        # **תיקון V33.2: סינון ומיון לפי תאריך האירוע**
         try:
             potential_races = schedule.loc[
                 (schedule['EventFormat'] == 'conventional') &
@@ -179,7 +188,7 @@ def find_last_three_races_data(current_year, event, expander_placeholder):
                 st.success(f"✅ נתוני מרוץ {event_name} נטענו בהצלחה.")
             else:
                 # אם ה-load_and_process_data נכשל, מציג אזהרה בתוך האקספנדר
-                st.warning(f"⚠️ לא ניתן היה לטעון נתוני מרוץ מלאים עבור {event_name}. ה-AI יתעלם מהמרוץ הזה. (שגיאה: {session_name})") # הוספת פרטי שגיאה לאזהרה
+                st.warning(f"⚠️ לא ניתן היה לטעון נתוני מרוץ מלאים עבור {event_name}. ה-AI יתעלם מהמרוץ הזה. (שגיאה: {session_name})") 
 
         if not race_reports:
             st.error(f"לא נמצאו נתונים מלאים לאף אחד מ-3 המרוצים הקודמים ב-{current_year}. הניתוח יתבסס על היסטוריה בלבד.")
@@ -347,7 +356,7 @@ def main():
     
     st.set_page_config(page_title="F1 P1 Predict", layout="centered")
 
-    st.title("🏎️ F1 Strategy Predictor V33")
+    st.title("🏎️ F1 Strategy Predictor V35")
     st.markdown("כלי לניתוח אסטרטגיה וחיזוי מנצח מבוסס נתוני FastF1 ו-Gemini AI.")
     st.markdown("---")
     

@@ -31,6 +31,26 @@ MODEL_NAME = "gemini-2.5-flash"
 
 # --- פונקציות עזר לטיפול בנתונים ---
 
+# **תיקון V44: ודא סוגר כפול סגור**
+@retry(wait=wait_exponential(multiplier=1, min=2, max=10), stop=stop_after_attempt(3))
+def get_gemini_prediction(prompt):
+    """שולח את הפרומפט ל-Gemini Flash ומשתמש במפתח מה-Secrets."""
+    
+    try:
+        api_key = st.secrets.get("GEMINI_API_KEY")
+        if not api_key:
+             raise ValueError("GEMINI_API_KEY לא נמצא ב-Streamlit Secrets. אנא הגדר אותו.")
+    except Exception as e:
+        raise ValueError(f"שגיאת API Key: {e}")
+        
+    client = genai.Client(api_key=api_key)
+    response = client.models.generate_content(
+        model=MODEL_NAME,
+        contents=prompt
+    )
+    return response.text
+
+
 # ללא Caching של Streamlit
 def load_and_process_data(year, event, session_key):
     """טוען נתונים מ-FastF1 ומבצע עיבוד ראשוני, עם טיפול בשגיאות גרסה של session.load()."""
@@ -124,24 +144,6 @@ def load_and_process_data(year, event, session_key):
 
     return context_data, session.name
 
-@retry(wait=wait_exponential(multiplier=1, min=2, max=10), stop=stop_after_attempt(3))
-def get_gemini_prediction(prompt):
-    """שולח את הפרומפט ל-Gemini Flash ומשתמש במפתח מה-Secrets."""
-    
-    try:
-        api_key = st.secrets.get("GEMINI_API_KEY")
-        if not api_key:
-             raise ValueError("GEMINI_API_KEY לא נמצא ב-Streamlit Secrets. אנא הגדר אותו.")
-    except Exception as e:
-        raise ValueError(f"שגיאת API Key: {e}")
-        
-    client = genai.Client(api_key=api_key)
-    response = client.models.generate_content(
-        model=MODEL_NAME,
-        contents=prompt
-    )
-    return response.text
-
 # --- פונקציות לתחזית מוקדמת (Pre-Race) ---
 
 def find_last_three_races_data(current_year, event, expander_placeholder):
@@ -165,6 +167,7 @@ def find_last_three_races_data(current_year, event, expander_placeholder):
         
         if current_event.empty:
             # V44: מחזיר סטטוס (כשל ב-FastF1), לא st.error
+            # זה הכשל שהוביל ל-Streamlit Error בגלל שהוא חזר כ-st.error בפנים
             return [], "❌ לא נמצא בלוח הזמנים המלא. ממשיך עם נתונים היסטוריים בלבד." 
             
         # אם האירוע נמצא, ממשיכים כרגיל:
@@ -392,7 +395,8 @@ Based on: {based_on_text}
         if not full_data_prompt:
              raise ValueError("ה-prompt נכשל: אין נתוני בסיס ליצירת הדו\"ח.")
 
-        report = get_gemini_prediction(prompt)
+        # קריאה לפונקציה המתוקנת
+        report = get_gemini_prediction(prompt) 
         return report
     except Exception as e:
         st.error(f"❌ שגיאה ב-Gemini API במהלך יצירת תחזית מוקדמת: {e}")

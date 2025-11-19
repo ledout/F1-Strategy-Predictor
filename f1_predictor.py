@@ -2,15 +2,20 @@ import streamlit as st
 import fastf1
 import pandas as pd
 import logging
-import re
 from google import genai
 from google.genai.errors import APIError
 from tenacity import retry, stop_after_attempt, wait_exponential
-import os
 
 # --- הגדרות ראשוניות ---
 pd.options.mode.chained_assignment = None
 logging.getLogger('fastf1').setLevel(logging.ERROR)
+
+# **הסרת כל הטיפול הידני ב-Cache של FastF1**
+# כיבוי מוחלט של FastF1 Cache מקומי - מכריח טעינה חדשה דרך הרשת (עם Caching של Streamlit)
+try:
+    fastf1.set_cache_path(None)
+except Exception:
+    pass
 
 # --- קבועים ---
 TRACKS = ["Bahrain", "Saudi Arabia", "Australia", "Imola", "Miami", "Monaco", 
@@ -22,29 +27,11 @@ SESSIONS = ["FP1", "FP2", "FP3", "Q", "S", "R"]
 YEARS = [2025, 2024, 2023, 2022, 2021, 2020]
 MODEL_NAME = "gemini-2.5-flash"
 
-# --- הגדרת FastF1 Cache (ניסיון לפתור בעיות סביבה) ---
-# הגדרת נתיב זמני ל-cache של FastF1 כדי למנוע כשלים סביבתיים
-CACHE_DIR = os.path.join(os.getcwd(), '.fastf1_cache_dir')
-
-try:
-    if not os.path.exists(CACHE_DIR):
-        os.makedirs(CACHE_DIR)
-    fastf1.Cache.enable_cache(CACHE_DIR)
-except Exception as e:
-    # ממשיכים גם אם ה-Cache נכשל.
-    print(f"FastF1 Cache setup failed: {e}")
-
-# פונקציה לניקוי Cache חיצונית, נקרא לה בתוך main
-def clear_f1_cache():
-    try:
-        fastf1.Cache.clear_cache(deep=True)
-    except Exception:
-        pass
 
 # --- פונקציות עזר לטיפול בנתונים ---
 
 # שימוש ב-st.cache_data כדי לשפר יציבות בטעינת נתונים
-@st.cache_data(ttl=3600, show_spinner="טוען נתוני F1...")
+@st.cache_data(ttl=3600, show_spinner="טוען נתוני F1 (מכבה FastF1 Cache מקומי)...")
 def load_and_process_data(year, event, session_key):
     """טוען נתונים מ-FastF1 ומבצע עיבוד ראשוני, עם Caching של Streamlit."""
     
@@ -52,7 +39,6 @@ def load_and_process_data(year, event, session_key):
         session = fastf1.get_session(year, event, session_key)
         
         # 1. ניסיון טעינת הנתונים
-        # אם ה-Session object לא תקין, השגיאה תיתפס כאן.
         session.load_laps(with_telemetry=False)
         
         # 2. בדיקה: אם אין הקפות, זה כנראה אירוע חסר נתונים
@@ -60,13 +46,14 @@ def load_and_process_data(year, event, session_key):
             return None, f"שגיאה: האירוע {year} {event} {session_key} טרם התקיים, או שלא נמצאו נתונים תקינים עבורו."
             
     except Exception as e:
-        # טיפול בכשל טעינה (כמו 'Session' object has no attribute 'load_laps' או 'Failed to load any schedule data')
+        # טיפול בכשל טעינה (כולל 'load_laps' ו-'Failed to load any schedule data')
         error_message = str(e)
+        
         if "'Session' object has no attribute 'load_laps'" in error_message:
              return None, f"שגיאה בטעינת FastF1: נתונים חסרים עבור {year} {event} {session_key}. נסה סשן אחר או שנה אחרת."
         
         if "Failed to load any schedule data" in error_message:
-             return None, f"שגיאה בטעינת FastF1: Failed to load any schedule data. ייתכן שזו בעיית רשת/חיבור של FastF1."
+             return None, f"שגיאה בטעינת FastF1: FastF1: Failed to load any schedule data. ייתכן שזו בעיית רשת/חיבור של FastF1."
         
         return None, f"שגיאת FastF1 בטעינה: {error_message}"
 
@@ -166,85 +153,4 @@ def get_gemini_prediction(prompt):
         
     client = genai.Client(api_key=api_key)
     response = client.models.generate_content(
-        model=MODEL_NAME,
-        contents=prompt
-    )
-    return response.text
-
-# --- פונקציה ראשית של Streamlit ---
-
-def main():
-    """פונקציה ראשית המריצה את האפליקציה ב-Streamlit."""
-    st.set_page_config(page_title="F1 Strategy Predictor V33", layout="centered")
-
-    st.title("🏎️ F1 Strategy Predictor V33")
-    st.markdown("---")
-    st.markdown("כלי לניתוח אסטרטגיה וחיזוי מנצח מבוסס נתוני FastF1 ו-Gemini AI.")
-    
-    # בדיקת מפתח API (בשרת Streamlit)
-    try:
-        if "GEMINI_API_KEY" not in st.secrets or not st.secrets["GEMINI_API_KEY"]:
-            st.error("❌ שגיאה: מפתח ה-API של Gemini לא הוגדר ב-Streamlit Secrets. אנא ודא שהגדרת אותו כראוי.")
-            return
-
-    except Exception:
-        st.error("❌ שגיאה: כשל בקריאת מפתח API. ודא שהגדרת אותו כראוי ב-Secrets.")
-        return
-
-    st.markdown("---")
-
-    # בחירת פרמטרים
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        selected_year = st.selectbox("שנה:", YEARS, index=1) # 2024
-    with col2:
-        selected_event = st.selectbox("מסלול:", TRACKS, index=0) # Bahrain
-    with col3:
-        selected_session = st.selectbox("סשן:", SESSIONS, index=5)
-    
-    st.markdown("---")
-    
-    # כפתור הפעלה
-    if st.button("🏎️ חזה את המנצח (אוטומטי)", use_container_width=True, type="primary"):
-        # נקה את ה-cache של FastF1 לפני כל טעינה כדי לכפות נתונים חדשים
-        clear_f1_cache() 
-        
-        st.subheader(f"🔄 מתחיל ניתוח: {selected_event} {selected_year} ({selected_session})")
-        
-        status_placeholder = st.empty()
-        # **תיקון תחביר (נקודה בסוף השורה)**
-        status_placeholder.info("...טוען ומעבד נתונים מ-FastF1 (בניסיון עקיפת בעיות רשת/cache)")
-        
-        # 1. טעינת ועיבוד הנתונים (משתמש ב-st.cache_data)
-        # נצטרך לעשות clear cache גם ל-streamlit אם המשתמש משנה בחירה
-        
-        context_data, session_name = load_and_process_data(selected_year, selected_event, selected_session)
-
-        if context_data is None:
-            # הצגת השגיאה שהוחזרה מ-load_and_process_data
-            status_placeholder.error(f"❌ שגיאה: {session_name}")
-            return
-        
-        status_placeholder.success("✅ נתונים עובדו בהצלחה. שולח לניתוח AI...")
-
-        # 2. יצירת הפרומפט וקבלת התחזית
-        try:
-            prompt = create_prediction_prompt(context_data, selected_year, selected_event, selected_session)
-            
-            prediction_report = get_gemini_prediction(prompt)
-
-            status_placeholder.success("🏆 הניתוח הושלם בהצלחה!")
-            st.markdown("---")
-            
-            # 3. הצגת הדו"ח
-            st.markdown(prediction_report)
-
-        except APIError as e:
-            status_placeholder.error(f"❌ שגיאת Gemini API: לא הצליח לקבל תגובה. פרטי שגיאה: {e}")
-        except Exception as e:
-            status_placeholder.error(f"❌ שגיאה בלתי צפויה: {e}")
-
-
-if __name__ == "__main__":
-    main()
+        model=

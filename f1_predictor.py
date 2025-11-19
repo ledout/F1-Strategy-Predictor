@@ -13,6 +13,7 @@ logging.getLogger('fastf1').setLevel(logging.ERROR)
 # **כיבוי מוחלט של FastF1 Cache מקומי (פתרון לבעיות רשת/סביבה ב-Streamlit Cloud)**
 try:
     # מונע כשלים הקשורים לקאשינג בסביבת Streamlit Cloud
+    # נמנע משימוש בקאש כדי לשפר יציבות ב-Streamlit
     fastf1.set_cache_path(None)
 except Exception:
     pass
@@ -40,7 +41,8 @@ def load_and_process_data(year, event, session_key):
         session = fastf1.get_session(year, event, session_key)
         
         # 2. ניסיון טעינת הנתונים
-        session.load(telemetry=False, weather=False) 
+        # משתמש ב-allow_n_attempt כדי לפתור בעיות טעינה חולפות
+        session.load(telemetry=False, weather=False, allow_n_attempt=5) 
         
         # 3. בדיקה: אם אין הקפות, זה כנראה אירוע חסר נתונים
         if session.laps is None or session.laps.empty:
@@ -70,7 +72,7 @@ def load_and_process_data(year, event, session_key):
         (laps['Sector1SessionTime'].notna())
     ].copy()
 
-    # **תיקון TypeError:** יצירת עמודת זמן בשניות עבור חישוב var
+    # יצירת עמודת זמן בשניות עבור חישוב var
     laps_filtered['LapTime_s'] = laps_filtered['LapTime'].dt.total_seconds()
     
     # 5. חישוב נתונים סטטיסטיים
@@ -100,7 +102,7 @@ def load_and_process_data(year, event, session_key):
         best_time_str = str(row['Best_Time']).split('0 days ')[-1][:10] if row['Best_Time'] is not pd.NaT else 'N/A'
         avg_time_str = str(row['Avg_Time']).split('0 days ')[-1][:10] if row['Best_Time'] is not pd.NaT else 'N/A'
         
-        # בניית מחרוזת הנתונים - זו השורה שגרמה לשגיאת תחביר 
+        # בניית מחרוזת הנתונים - ודא שכל הגרשיים נסגרים כראוי
         data_lines.append(
             f"DRIVER: {row['Driver']} | Best: {best_time_str} | Avg: {avg_time_str} | Var: {row['Var']:.3f} | Laps: {int(row['Laps'])}"
         )
@@ -115,7 +117,7 @@ def create_prediction_prompt(context_data, year, event, session_name):
     
     prompt_data = f"--- נתונים גולמיים לניתוח (Top 10 Drivers, Race/Session Laps) ---\n{context_data}"
 
-    # 2. בניית הפרומפט המלא באמצעות f-string משולש (תיקון SyntaxError)
+    # 2. בניית הפרומפט המלא באמצעות f-string משולש (תיקון שגיאות תחביר)
     prompt = f"""
 אתה אנליסט אסטרטגיה בכיר של פורמולה 1. משימתך היא לנתח את הנתונים הסטטיסטיים של הקפות המרוץ 
 ({session_name}, {event} {year}) ולספק דוח אסטרטגי מלא ותחזית מנצח.
@@ -178,7 +180,7 @@ def get_gemini_prediction(prompt):
     )
     return response.text
 
-# --- פונקציות לתחזית מוקדמת (Pre-Race) - הקוד המעודכן שאנו רוצים ---
+# --- פונקציות לתחזית מוקדמת (Pre-Race) ---
 
 @st.cache_data(ttl=3600, show_spinner="טוען לוח זמנים F1...")
 def find_last_three_races_data(current_year, event):
@@ -196,7 +198,7 @@ def find_last_three_races_data(current_year, event):
     except IndexError:
         event_index = len(schedule) 
     
-    # --- התיקון כאן: טיפול ב-KeyError עבור שנים עתידיות/ישנות ---
+    # --- התיקון ל-KeyError: 'EventCompleted' עבור שנים עתידיות/ישנות ---
     if 'EventCompleted' not in schedule.columns or 'EventFormat' not in schedule.columns:
         st.warning(f"⚠️ אזהרה: לוח הזמנים של {current_year} אינו מכיל נתוני השלמה מרוץ ('EventCompleted'). לא ניתן לטעון קונטקסט עונתי.")
         return [], f"אין נתוני סיום מרוץ זמינים עבור {current_year}."
@@ -268,7 +270,7 @@ def get_preliminary_prediction(current_year, event):
         based_on_text = f"{event} {previous_year} Race Data Only (No Current Season Context)."
 
 
-    # 4. בניית פרומפט המשלב את כל הדוחות באמצעות f-string משולש (תיקון SyntaxError)
+    # 4. בניית פרומפט המשלב את כל הדוחות באמצעות f-string משולש (תיקון שגיאות תחביר)
     
     full_data_prompt = report_prev + "\n" + report_current
     
@@ -342,6 +344,7 @@ def main():
             return
 
     except Exception:
+        # זה ייתפס אם יש בעיה בגישה ל-st.secrets
         st.error("❌ שגיאה: כשל בקריאת מפתח API. ודא שהגדרת אותו כראוי ב-Secrets.")
         return
 

@@ -154,19 +154,19 @@ def find_last_three_races_data(current_year, event, expander_placeholder):
             schedule = fastf1.get_event_schedule(current_year)
             if schedule.empty:
                 st.error("שגיאה: לוח הזמנים של השנה הנוכחית ריק.")
-                return [], "שגיאה בטעינת לוח זמנים."
+                return [], "שגיאה בטעינת לוח זמנים." # **V43: החזרה תמיד של רשימה ריקה**
 
         except Exception as e:
             st.error(f"שגיאה: לא ניתן לטעון את לוח הזמנים של השנה הנוכחית. {e}")
-            return [], "שגיאה בטעינת לוח זמנים."
+            return [], "שגיאה בטעינת לוח זמנים." # **V43: החזרה תמיד של רשימה ריקה**
         
-        # 1. מצא את האירוע הנוכחי (תיקון V41: בדיקה מפורשת של ריקנות במקום try/except)
+        # 1. מצא את האירוע הנוכחי
         current_event = schedule[schedule['EventName'] == event]
         
         if current_event.empty:
-            # אם האירוע הנוכחי לא נמצא בלוח הזמנים (כי הוא עתידי/לא מלא), מדלגים על הקונטקסט העונתי.
+            # אם האירוע הנוכחי לא נמצא בלוח הזמנים (כי הוא עתידי/לא מלא)
             st.error(f"❌ לא נמצא בלוח הזמנים המלא. ממשיך עם נתונים היסטוריים בלבד.")
-            return [], "אירוע לא נמצא בלוח הזמנים (אין קונטקסט עונתי)."
+            return [], "אירוע לא נמצא בלוח הזמנים (אין קונטקסט עונתי)." # **V43: החזרה תמיד של רשימה ריקה**
             
         # אם האירוע נמצא, ממשיכים כרגיל:
         current_event_date = current_event['EventDate'].iloc[0]
@@ -175,22 +175,22 @@ def find_last_three_races_data(current_year, event, expander_placeholder):
         # 2. בדיקת סיבוב (Round Number)
         if current_event_round <= 4:
             st.warning(f"⚠️ אזהרה: האירוע הנוכחי ({event}) הוא אחד מ-4 המרוצים הראשונים של העונה. אין מספיק קונטקסט עונתי. מדלג על טעינת 3 המרוצים הקודמים.")
-            return [], "דילוג עונתי (מרוץ מוקדם מדי בעונה)."
+            return [], "דילוג עונתי (מרוץ מוקדם מדי בעונה)." # **V43: החזרה תמיד של רשימה ריקה**
         
-        # 3. סינון מרוצים: רק אירועים שמתכונתם 'conventional' והתאריך שלהם קטן מתאריך המרוץ הנוכחי
+        # 3. סינון מרוצים (קיצור הדרך ל-3 המרוצים האחרונים)
         try:
             potential_races = schedule.loc[
                 (schedule['EventFormat'] == 'conventional') &
                 (schedule['EventDate'] < current_event_date)
-            ].sort_values(by='EventDate', ascending=False).head(3) # מיין לפי תאריך יורד וקח את 3 האחרונים
+            ].sort_values(by='EventDate', ascending=False).head(3) 
         except KeyError as e:
             st.error(f"שגיאת FastF1: עמודה חסרה ({e}). לא ניתן לבצע ניתוח עונתי.")
-            return [], f"FastF1: עמודה חסרה ({e}). לא ניתן לבצע ניתוח עונתי."
+            return [], f"FastF1: עמודה חסרה ({e}). לא ניתן לבצע ניתוח עונתי." # **V43: החזרה תמיד של רשימה ריקה**
         
         
         if potential_races.empty:
             st.warning(f"אין מרוצים רגילים קודמים בלוח הזמנים של {current_year} טרם מרוץ {event}.")
-            return [], f"אין מרוצים קודמים ב-{current_year}."
+            return [], f"אין מרוצים קודמים ב-{current_year}." # **V43: החזרה תמיד של רשימה ריקה**
         
         race_reports = []
         
@@ -214,7 +214,7 @@ def find_last_three_races_data(current_year, event, expander_placeholder):
 
         if not race_reports:
             st.error(f"לא נמצאו נתונים מלאים לאף אחד מ-3 המרוצים הקודמים ב-{current_year}. הניתוח יתבסס על היסטוריה בלבד.")
-            return [], f"לא נמצאו נתונים עונתיים מלאים ב-{current_year}."
+            return [], f"לא נמצאו נתונים עונתיים מלאים ב-{current_year}." # **V43: החזרה תמיד של רשימה ריקה**
         
         st.success("✅ נתונים עונתיים עובדו בהצלחה. ממשיך ל-AI.")
         return race_reports, "נתונים עונתיים נטענו"
@@ -256,7 +256,7 @@ Based on: Specific Session Data ({session_name} Combined)
 ## Weather/Track Influence
 ...
 
-## Strategic Conclusions and Winner Justification
+## Strategic Conclusions and Winner Justitive
 ...
 
 ## 📊 Confidence Score Table (D5 - Visual Data)
@@ -299,26 +299,37 @@ def get_preliminary_prediction(current_year, event):
 
     # 3. בדיקת נתונים ואיחוד דוחות (מחוץ לאקספנדר)
     
+    # **V43: אתחול base_on_text**
+    based_on_text = ""
+    report_current = f"--- דוח קצב עונתי (אין נתונים עונתיים זמינים) ---\n"
+    
     if context_data_prev:
         report_prev = (
             f"--- דוח קצב: {event} מרוץ {previous_year} (קונטקסט מסלול היסטורי) ---\n"
             f"הדוח מתאר את ביצועי הנהגים במסלול הספציפי {event} בשנה הקודמת. השווה קצב ממוצע ו-Var:\n"
             f"{context_data_prev}\n"
         )
+        based_on_text += f"{event} {previous_year} Race Data"
     else:
         report_prev = f"--- דוח קצב: {event} מרוץ {previous_year} (אין נתונים היסטוריים זמינים למסלול) ---\n"
         
-    # **תיקון V42:** ודא ש-race_reports_current הוא רשימה של מחרוזות בלבד, ולא None או שגיאה
+    # **V43: ודא ש-race_reports_current הוא רשימה לא ריקה**
     if race_reports_current and isinstance(race_reports_current, list):
         report_current = "\n" + "\n".join(race_reports_current)
         num_races = len(race_reports_current)
-        based_on_text = f"{event} {previous_year} Race Data & Analysis of the Last {num_races} Races of {current_year}."
-    else:
-        # אם אין נתונים עונתיים (בגלל שגיאת תאריך יחוס או מרוץ מוקדם מדי)
-        report_current = f"--- דוח קצב עונתי (אין נתונים עונתיים זמינים) ---\n"
-        based_on_text = f"Data Based on: {event} {previous_year} Race Data Only (No Current Season Context)."
         
-    # **תיקון V42:** אם אין בכלל נתונים (לא היסטוריים ולא עונתיים), יש לעצור ולהציג שגיאה
+        if based_on_text:
+            based_on_text += " & "
+        based_on_text += f"Analysis of the Last {num_races} Races of {current_year}."
+    else:
+        # אם אין נתונים עונתיים
+        if not based_on_text:
+             based_on_text = f"No Current Season Context or Historical Data Available."
+        else:
+             based_on_text += " Only (No Current Season Context)."
+        
+        
+    # **V43: אם אין בכלל נתונים (לא היסטוריים ולא עונתיים), יש לעצור**
     if not context_data_prev and not race_reports_current:
         st.error("❌ לא נמצאו נתונים היסטוריים או עונתיים זמינים. לא ניתן לבצע ניתוח.")
         return None
@@ -372,6 +383,10 @@ Based on: {based_on_text}
 """
     
     try:
+        # **V43: בדיקה סופית וקפדנית לפני קריאה ל-API**
+        if not full_data_prompt:
+             raise ValueError("ה-prompt נכשל: אין נתוני בסיס ליצירת הדו\"ח.")
+
         report = get_gemini_prediction(prompt)
         return report
     except Exception as e:

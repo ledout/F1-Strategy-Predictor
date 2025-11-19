@@ -152,4 +152,33 @@ def main():
 
     st.title("🏎️ F1 Strategy Predictor V33")
     st.markdown("---")
-    st.markdown("כלי לניתוח אסטרטגיה
+    # קו זה תוקן כדי לוודא שאין טעות תחביר בגרשיים (")
+    st.markdown("כלי לניתוח אסטרטגיה וחיזוי מנצח מבוסס נתוני FastF1 ו-Gemini AI.")
+    
+    # בדיקת מפתח API (בשרת Streamlit)
+    try:
+        if "GEMINI_API_KEY" not in st.secrets or not st.secrets["GEMINI_API_KEY"]:
+            st.error("❌ שגיאה: מפתח ה-API של Gemini לא הוגדר ב-Streamlit Secrets. אנא ודא שהגדרת אותו כראוי.")
+            return
+
+    except Exception:
+        st.error("❌ שגיאה: כשל בקריאת מפתח API. ודא שהגדרת אותו כראוי ב-Secrets.")
+        return
+
+    st.markdown("---")
+
+    # בחירת פרמטרים
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        selected_year = st.selectbox("שנה:", YEARS, index=2)
+    with col2:
+        selected_event = st.selectbox("מסלול:", TRACKS, index=18)
+    with col3:
+        selected_session = st.selectbox("סשן:", SESSIONS, index=5)
+    
+    st.markdown("---")
+    
+    # כפתור הפעלה
+    if st.button("🏎️ חזה את המנצח (אוטומטי)", use_container_width=True, type="primary"):
+        st.subheader(f"🔄 מתחיל ניתוח: {selected_event} {selected_year} ({

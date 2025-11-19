@@ -6,8 +6,8 @@ from google import genai
 from google.genai.errors import APIError
 from tenacity import retry, stop_after_attempt, wait_exponential
 import io 
-from datetime import date # **תיקון V46: ודא ש-date מיובא כראוי**
-import numpy as np # הוספת ייבוא Numpy לטובת עמידות
+from datetime import date 
+import numpy as np 
 
 # --- הגדרות ראשוניות ---
 pd.options.mode.chained_assignment = None
@@ -375,12 +375,12 @@ def get_preliminary_prediction(current_year, event):
 
 {full_data_prompt}
 
---- הנחיות לניתוח (V33 - שילוב היסטוריה וקונטקסט רחב) ---
+--- הנחיות לניתוח (V47 - שקילה 65/35, מזג אוויר עקיף) ---
 1. **Immediate Prediction (Executive Summary):** בחר מנצח אחד והצג את הנימוק העיקרי (קצב ממוצע, עקביות או מגמה עונתית) בשורה אחת, **באנגלית בלבד**. (חובה)
 2. **Past Performance Analysis:** נתח את הדו\"ח ההיסטורי (שנה קודמת במסלול זה). הסבר מי היה דומיננטי מבחינת קצב ועקביות במסלול זה.
-3. **Current Season Trend Analysis:** נתח את דוחות המרוצים העונתיים. **בצע סיכום קצר של מגמת יחסי הכוחות בין הקבוצות המובילות (Red Bull, Ferrari, Mercedes) ב-3 המרוצים האחרונים.** מי נמצא במגמת שיפור ומי בירידה? אם אין נתונים עונתיים, השתמש בידע כללי על המגמות העונתיות עד כה.
-4. **Strategic Conclusions and Winner Justification:** הצדק את בחירת המנצח על בסיס שילוב של **דומיננטיות קודמת במסלול** (מ-{previous_year}) ו**יכולת עונתית עדכנית** (מגמת 3 המרוצים האחרונים). עדיפות לנהג עם שילוב של חוזק היסטורי ומגמת שיפור עונתית.
-5. **אסטרטגיה מומלצת:** נתח את הנתונים וספק **אסטרטגיית צמיגים** מומלצת למרוץ הקרוב (לדוגמה: Hard-Medium-Hard) וניתוח **Pit-Stop Window**.
+3. **Current Season Trend Analysis:** נתח את דוחות המרוצים העונתיים. **בצע סיכום קצר של מגמת יחסי הכוחות בין הקבוצות המובילות (Red Bull, Ferrari, Mercedes) ב-3 המרוצים האחרונים.** מי נמצא במגמת שיפור ומי בירידה?
+4. **Strategic Conclusions and Winner Justification:** הצדק את בחירת המנצח על בסיס שילוב של **יכולת עונתית עדכנית (משקל 65%)** ו**דומיננטיות קודמת במסלול (משקל 35%)**. הניתוח חייב לשקף את ההטיה הזו.
+5. **Weather & Tire Degradation (Implicit):** נתח את הנתונים וספק **אסטרטגיית צמיגים** מומלצת למרוץ הקרוב (לדוגמה: Hard-Medium-Hard) וניתוח **Pit-Stop Window**. **הנח תנאי מזג אוויר יבש ורגיל,** אלא אם כן נתוני ה-Var הגבוהים מראים בבירור על תנאי גשם/רטוב (ואז ציין זאת במפורש).
 6. **Confidence Score Table (D5):** ספק טבלת Confidence Score (בפורמט Markdown) המכילה את 5 המועמדים המובילים עם אחוז ביטחון (סך כל האחוזים חייב להיות 100%). **תקן את פורמט הטבלה כך שיופיע תקין ב-Markdown**.
 
 --- פורמט פלט חובה (Markdown, עברית למעט הכותרת הראשית) ---
@@ -406,11 +406,11 @@ Based on: {based_on_text}
 ## 📊 Confidence Score Table (D5 - Visual Data)
 | Driver | Confidence Score (%) |
 |:--- | :--- |
-| ... | ... |
-| ... | ... |
-| ... | ... |
-| ... | ... |
-| ... | ... |
+| ... | :--- |
+| ... | :--- |
+| ... | :--- |
+| ... | :--- |
+| ... | :--- |
 """
     
     try:

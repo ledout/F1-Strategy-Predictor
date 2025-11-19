@@ -1,0 +1,13 @@
+[theme]
+# Theme בסיסי כהה
+base="dark" 
+# צבע ה-Primary (זה צבע הכפתור הראשי, שכרגע הוא אדום/כתום)
+primaryColor="#DC0000" 
+# צבע הרקע הכללי 
+backgroundColor="#0E1117" 
+# צבע רקע של אלמנטים (כמו תיבות קלט)
+secondaryBackgroundColor="#262730"
+# צבע הטקסט הראשי
+textColor="#FAFAFA"
+# פונט
+font="sans serif"

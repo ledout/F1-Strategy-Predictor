@@ -48,8 +48,8 @@ def load_and_process_data(year, event, session_key):
         # טיפול בכשל טעינה (כולל 'load_laps' ו-'Failed to load any schedule data')
         error_message = str(e)
         
-        if "'Session' object has no attribute 'load_laps'" in error_message:
-             return None, f"שגיאה בטעינת FastF1: נתונים חסרים עבור {year} {event} {session_key}. נסה סשן אחר או שנה אחרת."
+if "load_laps" in error_message or "schedule data" in error_message:
+    return None, f"שגיאה בטעינת FastF1: נתונים חסרים עבור {year} {event} {session_key}. נסה סשן אחר או שנה אחרת."
         
         if "Failed to load any schedule data" in error_message:
              return None, f"שגיאה בטעינת FastF1: FastF1: Failed to load any schedule data. ייתכן שזו בעיית רשת/חיבור של FastF1."
@@ -229,3 +229,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

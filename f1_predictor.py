@@ -107,6 +107,7 @@ def load_and_process_data(year, event, session_key):
 def get_gemini_prediction(prompt):
     """שולח את הפרומפט ל-Gemini Flash ומשתמש במפתח מה-Secrets."""
     
+    # *** התיקון כאן: ודא שה-try מתחיל בעמודה הנכונה (שורה 159) ***
     try:
         api_key = st.secrets.get("GEMINI_API_KEY")
         if not api_key:
@@ -272,6 +273,7 @@ def get_preliminary_prediction(current_year, event):
              st.markdown("---")
         
         # 2. טעינת נתונים עונתיים (3 המרוצים האחרונים שהושלמו)
+        # find_last_three_races_data כבר משתמש ב-expander_placeholder.container()
         race_reports_current, status_msg = find_last_three_races_data(current_year, event, expander_placeholder)
 
     # 3. בדיקת נתונים ואיחוד דוחות (מחוץ לאקספנדר)
@@ -305,7 +307,7 @@ def get_preliminary_prediction(current_year, event):
 
 --- הנחיות לניתוח (V33 - שילוב היסטוריה וקונטקסט רחב) ---
 1. **Immediate Prediction (Executive Summary):** בחר מנצח אחד והצג את הנימוק העיקרי (קצב ממוצע, עקביות או מגמה עונתית) בשורה אחת, **באנגלית בלבד**. (חובה)
-2. **Past Performance Analysis:** נתח את הדו\"ח ההיסטורי (שנה קודמת במסלול זה). הסבר מי היה דומיננטי מבחינת קצב ועקביות במסלול זה.
+2. **Past Performance Analysis:** נתח את הדו"ח ההיסטורי (שנה קודמת במסלול זה). הסבר מי היה דומיננטי מבחינת קצב ועקביות במסלול זה.
 3. **Current Season Trend Analysis:** נתח את דוחות המרוצים העונתיים. **בצע סיכום קצר של מגמת יחסי הכוחות בין הקבוצות המובילות (Red Bull, Ferrari, Mercedes) ב-3 המרוצים האחרונים.** מי נמצא במגמת שיפור ומי בירידה?
 4. **Strategic Conclusions and Winner Justification:** הצדק את בחירת המנצח על בסיס שילוב של **דומיננטיות קודמת במסלול** (מ-2024/3) ו**יכולת עונתית עדכנית** (מגמת 3 המרוצים האחרונים). עדיפות לנהג עם שילוב של חוזק היסטורי ומגמת שיפור עונתית.
 5. **אסטרטגיה מומלצת:** נתח את הנתונים וספק **אסטרטגיית צמיגים** מומלצת למרוץ הקרוב (לדוגמה: Hard-Medium-Hard) וניתוח **Pit-Stop Window**.
@@ -364,9 +366,11 @@ def main():
     try:
         api_key_check = st.secrets.get("GEMINI_API_KEY")
         if not api_key_check:
+            # ודא שאין רווחים מיותרים אחרי ה-if
             st.error("❌ שגיאה: מפתח ה-API של Gemini לא הוגדר ב-Streamlit Secrets. אנא ודא שהגדרת אותו כראוי.")
         if not api_key_check:
-            st.warning("⚠️ שימו לב: מפתח ה-API לא נמצא. הניתוח יכשל כאשר ינסה להתחבר ל-Gemini.")
+             # אם הוא עדיין לא קיים, תן אזהרה נוספת
+             st.warning("⚠️ שימו לב: מפתח ה-API לא נמצא. הניתוח יכשל כאשר ינסה להתחבר ל-Gemini.")
 
     except Exception:
         st.error("❌ שגיאה: כשל בקריאת מפתח API. ודא שהגדרת אותו כראוי ב-Secrets.")

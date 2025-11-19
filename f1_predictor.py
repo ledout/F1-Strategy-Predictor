@@ -103,7 +103,7 @@ def load_and_process_data(year, event, session_key):
         best_time_str = str(row['Best_Time']).split('0 days ')[-1][:10] if row['Best_Time'] is not pd.NaT else 'N/A'
         avg_time_str = str(row['Avg_Time']).split('0 days ')[-1][:10] if row['Best_Time'] is not pd.NaT else 'N/A'
         
-        # **התיקון לשגיאת הסוגריים נשמר כאן**
+        # בניית מחרוזת הנתונים (תוקן)
         data_lines.append(
             f"DRIVER: {row['Driver']} | Best: {best_time_str} | Avg: {avg_time_str} | Var: {row['Var']:.3f} | Laps: {int(row['Laps'])}"
         )
@@ -122,12 +122,12 @@ def create_prediction_prompt(context_data, year, event, session_name):
     prompt = (
         "אתה אנליסט אסטרטגיה בכיר של פורמולה 1. משימתך היא לנתח את הנתונים הסטטיסטיים של הקפות המרוץ "
         f"({session_name}, {event} {year}) ולספק דוח אסטרטגי מלא ותחזית מנצח.\n\n"
-        # **התיקון לשגיאת ה-f-string (שורה 128 משוערת) נשמר כאן**
-        f"{prompt_data}\n\n"
+        # f-string תוקן 
+        f"{prompt_data}\n\n" 
         "--- הנחיות לניתוח (V33 - ניתוח משולב R/Q/S וקונטקסט) ---\n"
         "1. **Immediate Prediction (Executive Summary):** בחר מנצח אחד והצג את הנימוק העיקרי (קצב ממוצע או קונסיסטנטיות) בשורה אחת, **באנגלית בלבד**. (חובה)\n"
         "2. **Overall Performance Summary:** נתח את הקצב הממוצע (Avg Time) והעקביות (Var). Var < 1.0 נחשב לעקביות מעולה. Var > 5.0 עשוי להצביע על חוסר קונסיסטנטיות או הפרעות במרוץ (כגון תאונה או דגל אדום).\n"
-        # **התיקון לשגיאת הגרשיים הפנימיים נשמר כאן**
+        # גרשיים פנימיים תוקנו
         "3. **Tire and Strategy Deep Dive:** נתח את הנתונים ביחס למסלול (למשל, מקסיקו=גובה רב, מונזה=מהירות גבוהה). הסבר איזה סוג הגדרה ('High Downforce'/'Low Downforce') משתקף בנתונים, בהנחה שנתון ה-Max Speed של הנהגים המובילים זמין בניתוח שלך.\n"
         "4. **Weather/Track Influence:** הוסף קונטקסט כללי על תנאי המסלול והשפעתם על הצמיגים. הנח תנאים יציבים וחמים אלא אם כן ה-Var הגבוה מעיד על שימוש בצמיגי גשם/אינטר.\n" 
         "5. **Strategic Conclusions and Winner Justification:** הצג סיכום והצדקה ברורה לבחירת המנצח על בסיס נתונים ושיקולים אסטרטגיים.\n"
@@ -156,4 +156,29 @@ def create_prediction_prompt(context_data, year, event, session_name):
 @retry(wait=wait_exponential(multiplier=1, min=2, max=10), stop=stop_after_attempt(3))
 def get_gemini_prediction(prompt):
     """שולח את הפרומפט ל-Gemini Flash ומשתמש במפתח מה-Secrets."""
-    try
+    try: # <--- הנקודתיים (:) נוספו/וודאו כאן, זו הייתה השגיאה הקריטית האחרונה
+        api_key = st.secrets["GEMINI_API_KEY"]
+    except KeyError:
+        # מעלה שגיאה ברורה אם המפתח לא נמצא ב-Streamlit Secrets
+        raise ValueError("GEMINI_API_KEY לא נמצא ב-Streamlit Secrets. אנא הגדר אותו.")
+        
+    client = genai.Client(api_key=api_key)
+    response = client.models.generate_content(
+        model=MODEL_NAME,
+        contents=prompt
+    )
+    return response.text
+
+# --- פונקציה ראשית של Streamlit ---
+
+def main():
+    """פונקציה ראשית המריצה את האפליקציה ב-Streamlit."""
+    st.set_page_config(page_title="F1 Strategy Predictor V33", layout="centered")
+
+    st.title("🏎️ F1 Strategy Predictor V33")
+    st.markdown("---")
+    st.markdown("כלי לניתוח אסטרטגיה וחיזוי מנצח מבוסס נתוני FastF1 ו-Gemini AI.")
+    
+    # בדיקת מפתח API (בשרת Streamlit)
+    try:
+        if "GEMINI_API_KEY" not in st.

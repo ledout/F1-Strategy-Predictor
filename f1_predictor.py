@@ -31,14 +31,25 @@ MODEL_NAME = "gemini-2.5-flash"
 
 # --- פונקציות עזר לטיפול בנתונים ---
 
-@st.cache_data(ttl=3600, show_spinner="טוען נתוני F1 (מכבה FastF1 Cache מקומי)...")
+# **תיקון V38: הסרת st.cache_data כדי למנוע UnhashableParamError וניסיונות Load כושלים**
+# @st.cache_data(ttl=3600, show_spinner="טוען נתוני F1 (מכבה FastF1 Cache מקומי)...")
 def load_and_process_data(year, event, session_key):
-    """טוען נתונים מ-FastF1 ומבצע עיבוד ראשוני, עם Caching של Streamlit."""
+    """טוען נתונים מ-FastF1 ומבצע עיבוד ראשוני, ללא Caching של Streamlit."""
     
     try:
         session = fastf1.get_session(year, event, session_key)
-        # **תיקון V37 (Session.load): הסרת כל הפרמטרים מ-session.load() שוב, כיוון שיש גרסאות FastF1 שאינן תומכות בפרמטרים אלו (כמו force_ergast או allow_n_attempt)**
-        session.load(telemetry=False, weather=False, messages=False, laps=True, pit_stops=False)
+        
+        # **תיקון V38: ניסיון לטעון ללא ארגומנטים (כפי שזה עובד במונקו 2023)**
+        try:
+            session.load()
+        except TypeError as e:
+            # אם Session.load() נכשל בגלל ארגומנטים לא צפויים (allow_n_attempt, pit_stops)
+            # ננסה שיטה חלופית לטעינה עם טלמטריה כבויה
+            if "unexpected keyword argument" in str(e):
+                 # טעינה עם דגלים ספציפיים שסביר יותר שיתמכו
+                 session.load(telemetry=False, weather=False, messages=False, laps=True, pit_stops=False)
+            else:
+                 raise e
         
         # **בדיקת עמידות:** ודא ש-session.laps הוא DataFrame תקף
         if session.laps is None or session.laps.empty or not isinstance(session.laps, pd.DataFrame):
@@ -53,9 +64,8 @@ def load_and_process_data(year, event, session_key):
         if "not found" in error_message or "The data you are trying to access has not been loaded yet" in error_message:
              return None, f"נתונים חסרים עבור {year} {event} {session_key}. ייתכן שמדובר באירוע מבוטל או שטרם התקיים. שגיאה: {error_message.split(':', 1)[-1].strip()}"
         
-        # לכידת שגיאות ארגומנטים לא צפויים (Unexpected Keyword Arguments) מהתמונות
         if "unexpected keyword argument" in error_message:
-             return None, f"שגיאת גרסה ב-FastF1: הפונקציה Session.load() קיבלה ארגומנט לא צפוי. (נסה להריץ שוב, FastF1 לפעמים מתקן את עצמו). שגיאה: {error_message}"
+             return None, f"שגיאת גרסה ב-FastF1: הפונקציה Session.load() קיבלה ארגומנט לא צפוי. (שגיאה: {error_message})"
 
         return None, f"שגיאת FastF1 כללית בטעינה: {error_message}"
 
@@ -161,7 +171,7 @@ def find_last_three_races_data(current_year, event, expander_placeholder):
         
         # 2. סינון מרוצים: רק אירועים שמתכונתם 'conventional' והתאריך שלהם קטן מתאריך המרוץ הנוכחי
         try:
-            # חשוב גם לבדוק שהמרוץ הסתיים (EventCompleted) - עמודה זו אינה תמיד קיימת, לכן עדיף להסתמך על תאריך (EventDate) שהוא תמיד קיים.
+            # **תיקון V38: הסתמכות רק על EventDate ו-EventFormat - מניעת שגיאת EventCompleted**
             potential_races = schedule.loc[
                 (schedule['EventFormat'] == 'conventional') &
                 (schedule['EventDate'] < current_event_date)
@@ -182,6 +192,7 @@ def find_last_three_races_data(current_year, event, expander_placeholder):
             st.info(f"🔮 מנסה לטעון נתוני מרוץ: {event_name} {current_year}...")
             
             # ננסה לטעון נתונים (Load)
+            # שימו לב - לא נשתמש ב-st.cache_data בתוך הלולאה.
             context_data, session_name = load_and_process_data(current_year, event_name, 'R')
             
             if context_data:
@@ -239,7 +250,7 @@ Based on: Specific Session Data ({session_name} Combined)
 ## Weather/Track Influence
 ...
 
-## Strategic Conclusions and Winner Justification
+## Strategic Conclusions and Winner Justumification
 ...
 
 ## 📊 Confidence Score Table (D5 - Visual Data)
@@ -369,7 +380,7 @@ def main():
     
     # בדיקת מפתח API
     try:
-        # **תיקון V37 - שגיאת סינטקס בשורה 184**
+        # **תיקון V37 - שגיאת סינטקס**
         api_key_check = st.secrets.get("GEMINI_API_KEY")
         if not api_key_check:
             st.error("❌ שגיאה: מפתח ה-API של Gemini לא הוגדר ב-Streamlit Secrets. אנא ודא שהגדרת אותו כראוי.")
@@ -399,7 +410,8 @@ def main():
         st.subheader(f"🔄 מתחיל ניתוח: {selected_event} {selected_year} ({selected_session})")
         
         status_placeholder = st.empty()
-        status_placeholder.info("...טוען ומעבד נתונים מ-FastF1 (מנסה לעקוף בעיות חיבור/קאש)")
+        # **תיקון V38: הסרנו את ה-caching, נשנה את הסטטוס לטעינה רגילה**
+        status_placeholder.info("...טוען ומעבד נתונים מ-FastF1...")
         
         # טעינת ועיבוד הנתונים 
         context_data, status_msg = load_and_process_data(selected_year, selected_event, selected_session)

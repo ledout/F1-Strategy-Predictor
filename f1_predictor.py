@@ -454,7 +454,7 @@ def main():
 	)
 	
 	# V48: Translate Description & Center Text (UPDATED HERE)
-	st.markdown("<div style='text-align: center; font-size: 1.5em; font-weight: bold;'>Whos on pole?</div>", unsafe_allow_html=True)
+	st.markdown("<div style='text-align: center; font-size: 3.5em; font-weight: bold;'>Whos on pole?</div>", unsafe_allow_html=True)
 	st.markdown("---")
 	
 	# API Key Check
@@ -550,3 +550,4 @@ def main():
 
 if __name__ == "__main__":
 	main()
+

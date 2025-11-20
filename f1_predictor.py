@@ -454,7 +454,7 @@ def main():
     )
     
     # V48: Translate Description
-    st.markdown("An online data-based strategy analysis and winning prediction tool")
+    st.markdown("Whos on pole?")
     st.markdown("---")
     
     # API Key Check
@@ -550,3 +550,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

@@ -29,6 +29,8 @@ TRACKS = ["Bahrain", "Saudi Arabia", "Australia", "Imola", "Miami", "Monaco",
 SESSIONS = ["FP1", "FP2", "FP3", "Q", "S", "R"]
 YEARS = [2025, 2024, 2023, 2022, 2021, 2020]
 MODEL_NAME = "gemini-2.5-flash"
+# V50: Custom Header Image URL (Converted to RAW format for proper loading)
+IMAGE_HEADER_URL = "https://raw.githubusercontent.com/ledout/F1-Strategy-Predictor/main/F1-App.png"
 
 
 # --- Helper Functions for Data Processing ---
@@ -441,7 +443,16 @@ def main():
     
     st.set_page_config(page_title="F1 Strategy Predictor", layout="centered")
 
-    st.title("🏎️ F1 P1 Predict")
+    # V50: Custom Header Image from URL (Replacing st.title)
+    st.markdown(
+        f"""
+        <div style='text-align: center; margin-bottom: 20px;'>
+            <img src='{IMAGE_HEADER_URL}' alt='F1 P1 Predict Header' style='width: 100%; max-width: 800px; height: auto; border-radius: 5px; object-fit: cover;'>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+    
     # V48: Translate Description
     st.markdown("An online data-based strategy analysis and winning prediction tool")
     st.markdown("---")

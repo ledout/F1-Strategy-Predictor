@@ -40,12 +40,14 @@ def get_gemini_prediction(prompt):
 	"""Sends the prompt to Gemini Flash using the API key from Secrets."""
 	
 	try:
+		# Attempt to load the API key from Streamlit's secrets management
 		api_key = st.secrets.get("GEMINI_API_KEY")
 		if not api_key:
 			raise ValueError("GEMINI_API_KEY not found in Streamlit Secrets. Please set it.")
 	except Exception as e:
 		raise ValueError(f"API Key Error: {e}")
 		
+	# Initialize the Gemini Client
 	client = genai.Client(api_key=api_key)
 	response = client.models.generate_content(
 		model=MODEL_NAME,
@@ -61,28 +63,22 @@ def load_and_process_data(year, event, session_key):
 	try:
 		session = fastf1.get_session(year, event, session_key)
 		
-		# **V39/V44 Fix: Robust Session.load() attempt for different FastF1 versions**
+		# Robust Session.load() attempt for different FastF1 versions
 		try:
-			# 1. Basic load attempt (we only want laps)
 			session.load(laps=True, telemetry=False, weather=False, messages=False, pit_stops=False)
 		except TypeError as e:
-			# 2. If it fails due to unexpected arguments, try loading without any arguments.
 			if "unexpected keyword argument" in str(e):
-					# Let FastF1 load everything if the arguments don't work
 					session.load()
 			else:
-					# If it's another type error, re-raise it
 					raise e 
 		except Exception as e:
-			# General loading error - explicit flag path
 			error_message = str(e)
 			if "not loaded yet" in error_message:
-					# Explicit load attempt if there's a metadata issue
 					session.load(telemetry=False, weather=False, messages=False, laps=True, pit_stops=False)
 			else:
 					raise e
 		
-		# **Robustness Check:** Ensure session.laps is a valid DataFrame
+		# Robustness Check
 		if session.laps is None or session.laps.empty or not isinstance(session.laps, pd.DataFrame):
 			return None, f"Insufficient data for {year} {event} {session_key}. FastF1 'load_laps' error."
 			
@@ -102,8 +98,8 @@ def load_and_process_data(year, event, session_key):
 
 	laps = session.laps.reset_index(drop=True)
 	
-	# Required lap filtering
-	laps_filtered = laps.loc[
+	# Required lap filtering (all accurate laps for reference)
+	laps_filtered_accurate = laps.loc[
 		(laps['IsAccurate'] == True) & 
 		(laps['LapTime'].notna()) & 
 		(laps['Driver'] != 'OUT') & 
@@ -112,39 +108,80 @@ def load_and_process_data(year, event, session_key):
 		(laps['Sector1SessionTime'].notna())
 	].copy()
 
-	laps_filtered['LapTime_s'] = laps_filtered['LapTime'].dt.total_seconds()
-	
-	# 5. Calculate statistics
-	# V46: Use np.var to handle NaNs if any
-	driver_stats = laps_filtered.groupby('Driver').agg(
-		Best_Time=('LapTime', 'min'),
-		Avg_Time=('LapTime', 'mean'),
-		Var=('LapTime_s', lambda x: np.var(x) if len(x) >= 2 else np.nan),
-		Laps=('LapTime', 'count')
-	).reset_index()
+	# Determine the session type based on user request
+	is_pace_session = session_key in ['R', 'S']
 
-	driver_stats['Best_Time_s'] = driver_stats['Best_Time'].dt.total_seconds()
-	driver_stats['Avg_Time_s'] = driver_stats['Avg_Time'].dt.total_seconds()
-	
-	# Only include stats if 5 or more laps were completed
-	driver_stats = driver_stats[driver_stats['Laps'] >= 5]
-	driver_stats = driver_stats[driver_stats['Var'].notna()] # Remove drivers with no variance
-
-	
-	if driver_stats.empty:
-		return None, "Insufficient data (fewer than 5 laps per driver) for statistical analysis. Try a different session."
-
-	# Process data to text format (Top 10)
-	data_lines = []
-	driver_stats = driver_stats.sort_values(by='Avg_Time_s', ascending=True).head(10)
-	
-	for index, row in driver_stats.iterrows():
-		best_time_str = str(row['Best_Time']).split('0 days ')[-1][:10] if row['Best_Time'] is not pd.NaT else 'N/A'
-		avg_time_str = str(row['Avg_Time']).split('0 days ')[-1][:10] if row['Best_Time'] is not pd.NaT else 'N/A'
+	if is_pace_session:
+		# --- PACE ANALYSIS (RACE/SPRINT) - FOCUS ON CONSISTENCY AND AVG PACE ---
 		
-		data_lines.append(
-			f"DRIVER: {row['Driver']} | Best: {best_time_str} | Avg: {avg_time_str} | Var: {row['Var']:.3f} | Laps: {int(row['Laps'])}"
-		)
+		laps_filtered_accurate['LapTime_s'] = laps_filtered_accurate['LapTime'].dt.total_seconds()
+		
+		# Calculate statistics for drivers who completed at least 5 laps (for reliable pace analysis)
+		driver_stats = laps_filtered_accurate.groupby('Driver').agg(
+			Best_Time=('LapTime', 'min'),
+			Avg_Time=('LapTime', 'mean'),
+			Var=('LapTime_s', lambda x: np.var(x) if len(x) >= 2 else np.nan),
+			Laps=('LapTime', 'count'),
+			Team=('Team', 'first')
+		).reset_index()
+
+		driver_stats['Best_Time_s'] = driver_stats['Best_Time'].dt.total_seconds()
+		driver_stats['Avg_Time_s'] = driver_stats['Avg_Time'].dt.total_seconds()
+		
+		# Filter for strategic relevance: only include stats if 5 or more laps were completed
+		driver_stats = driver_stats[driver_stats['Laps'] >= 5]
+		driver_stats = driver_stats[driver_stats['Var'].notna()] # Remove drivers with no variance
+		
+		if driver_stats.empty:
+			return None, "Insufficient data (fewer than 5 laps per driver) for statistical analysis. Try a different session."
+
+		# Process data to text format (Top 10 by Average PACE - Strategy Focus)
+		data_lines = []
+		data_lines.append("Note: The following drivers are ranked by Average Lap Time (Avg) for Pace Analysis (RACE SESSION).")
+
+		# Sort by Average Time for strategic relevance and take the top 10
+		driver_stats = driver_stats.sort_values(by='Avg_Time_s', ascending=True).head(10)
+		
+		for index, row in driver_stats.iterrows():
+			best_time_str = str(row['Best_Time']).split('0 days ')[-1][:10] if row['Best_Time'] is not pd.NaT else 'N/A'
+			avg_time_str = str(row['Avg_Time']).split('0 days ')[-1][:10] if row['Best_Time'] is not pd.NaT else 'N/A'
+			
+			data_lines.append(
+				f"DRIVER: {row['Driver']} | Best: {best_time_str} | Avg: {avg_time_str} | Var: {row['Var']:.3f} | Laps: {int(row['Laps'])}"
+			)
+			
+	else:
+		# --- FASTEST LAP ANALYSIS (FP/Q) - FOCUS ON RAW SPEED AND RANKING ---
+		
+		# 1. Get the fastest lap for each driver
+		# Group by Driver and find the index of the minimum LapTime (the fastest lap)
+		fastest_lap_indices = laps_filtered_accurate.groupby('Driver')['LapTime'].idxmin()
+		driver_stats = laps_filtered_accurate.loc[fastest_lap_indices].copy()
+		
+		# 2. Select and rename required columns for the report
+		driver_stats = driver_stats[['Driver', 'Team', 'LapTime']].rename(columns={'LapTime': 'Best_Time'})
+		
+		if driver_stats.empty:
+			return None, "Insufficient data (no accurate laps recorded) for ranking. Try a different session."
+		
+		# 3. Sort by Best Time (fastest first)
+		driver_stats = driver_stats.sort_values(by='Best_Time', ascending=True).reset_index(drop=True)
+		
+		# 4. Format the output for the AI
+		data_lines = []
+		data_lines.append("--- OFFICIAL RANKING (Fastest Lap Only) ---")
+		data_lines.append(f"Note: This ranking is based ONLY on the single fastest lap time (Best) recorded by each driver in the {session_key} session.")
+		data_lines.append(f"TOTAL DRIVERS ANALYZED: {len(driver_stats)}")
+		data_lines.append("------------------------------------------")
+
+		# Only display the top 15 for brevity, but all drivers are available in the dataframe if needed.
+		for index, row in driver_stats.head(15).iterrows():
+			team_name = row['Team']
+			best_time_str = str(row['Best_Time']).split('0 days ')[-1][:10] if row['Best_Time'] is not pd.NaT else 'N/A'
+			
+			data_lines.append(
+				f"POS {index + 1} | DRIVER: {row['Driver']} | Team: {team_name} | Best Time: {best_time_str}"
+			)
 
 	context_data = "\n".join(data_lines)
 
@@ -153,10 +190,15 @@ def load_and_process_data(year, event, session_key):
 # --- Functions for Preliminary Prediction (Pre-Race) ---
 
 def find_last_three_races_data(current_year, event, expander_placeholder):
-	"""Finds the last three 'conventional' races that should have occurred this season and returns their race data."""
+	"""
+	Finds the last three 'conventional' races that should have occurred this season and returns their race data.
+	
+	IMPORTANT: This function is explicitly for pre-race analysis and MUST use 'R' (Race) session data,
+	where average pace and consistency are the correct metrics.
+	"""
 	
 	with expander_placeholder.container():
-		st.info("🔄 Starting seasonal data collection (Last 3 Races)")
+		st.info("🔄 מתחיל איסוף נתונים עונתי (3 מרוצים אחרונים)")
 		
 		schedule = None
 		current_event_date = pd.to_datetime(date.today()) # Set default to today's date
@@ -176,12 +218,12 @@ def find_last_three_races_data(current_year, event, expander_placeholder):
 		# V46: Robust handling if the current event is missing from the Schedule
 		
 		if current_event.empty:
-			st.warning(f"⚠️ Warning: Current event ({event}) not found in the full schedule. Using today's date ({current_event_date.strftime('%Y-%m-%d')}) as a seasonal reference point.")
+			st.warning(f"⚠️ אזהרה: האירוע הנוכחי ({event}) לא נמצא בלוח הזמנים המלא. משתמש בתאריך היום ({current_event_date.strftime('%Y-%m-%d')}) כנקודת יחוס עונתי.")
 			
 			# If the selected year is in the future (e.g., 2025), this might fail.
 			if current_year > date.today().year:
-				st.error("❌ Cannot perform seasonal analysis for a future year without a defined event date.")
-				return [], "❌ Cannot perform seasonal analysis for a future year."
+				st.error("❌ לא ניתן לבצע ניתוח עונתי לשנה עתידית ללא תאריך אירוע מוגדר.")
+				return [], "❌ לא ניתן לבצע ניתוח עונתי לשנה עתידית."
 			
 		else:
 			try:
@@ -192,15 +234,15 @@ def find_last_three_races_data(current_year, event, expander_placeholder):
 				
 				# 2. Check round number - only if the event was found
 				if current_event_round <= 4:
-					st.warning(f"⚠️ Warning: Current event ({event}) is one of the first 4 races of the season. Insufficient seasonal context. Skipping.")
+					st.warning(f"⚠️ אזהרה: האירוע הנוכחי ({event}) הוא אחד מ-4 המרוצים הראשונים של העונה. חסר קונטקסט עונתי מספק. מדלג.")
 					return [], "Seasonal skip (Race too early in the season)." 
 			except KeyError as e:
 				# V46: If a column is missing in the Schedule
-				st.error(f"FastF1 Schedule Error: Missing column ({e}). Using today's date.")
+				st.error(f"שגיאת לוח זמנים ב-FastF1: עמודה חסרה ({e}). משתמש בתאריך היום.")
 				# Continue with current_event_date = date.today()
 			except Exception as e:
 				# V46: Another unexpected Schedule error
-				st.error(f"Unexpected Schedule error: {e}")
+				st.error(f"שגיאת לוח זמנים בלתי צפויה: {e}")
 				return [], "FastF1 Schedule Error."
 		
 		
@@ -216,16 +258,16 @@ def find_last_three_races_data(current_year, event, expander_placeholder):
 		
 		
 		if potential_races.empty:
-			st.warning(f"No previous conventional races found in the {current_year} schedule before {event}.")
+			st.warning(f"לא נמצאו מרוצים קודמים קונבנציונליים בלוח הזמנים של {current_year} לפני {event}.")
 			return [], f"No previous races in {current_year}." 
 		
 		race_reports = []
 		
 		for index, race in potential_races.iterrows():
 			event_name = race['EventName']
-			st.info(f"🔮 Attempting to load Race Data: {event_name} {current_year}...")
+			st.info(f"🔮 מנסה לטעון נתוני מרוץ: {event_name} {current_year}...")
 			
-			# Attempt to load data
+			# Attempt to load data (MUST use 'R' for Race context)
 			context_data, session_name = load_and_process_data(current_year, event_name, 'R')
 			
 			if context_data:
@@ -234,23 +276,33 @@ def find_last_three_races_data(current_year, event, expander_placeholder):
 					f"{context_data}\n"
 				)
 				race_reports.append(report)
-				st.success(f"✅ Race data for {event_name} loaded successfully.")
+				st.success(f"✅ נתוני מרוץ עבור {event_name} נטענו בהצלחה.")
 			else:
 				# V46: If load_and_process_data fails
-				st.warning(f"⚠️ Could not load complete race data for {event_name}. AI will ignore this race. (Error: {session_name})") 
+				st.warning(f"⚠️ לא ניתן היה לטעון נתוני מרוץ מלאים עבור {event_name}. ה-AI יתעלם מהמרוץ הזה. (שגיאה: {session_name})") 
 
 		if not race_reports:
 			# V46: Returns a seasonal failure status
 			return [], f"No complete seasonal data found in {current_year}." 
 		
-		st.success("✅ Seasonal data processed successfully. Proceeding to AI.")
+		st.success("✅ נתונים עונתיים עובדו בהצלחה. ממשיך ל-AI.")
 		return race_reports, "Seasonal data loaded"
 
 
-def create_prediction_prompt(context_data, year, event, session_name):
+def create_prediction_prompt(context_data, year, event, session_name, session_key):
 	"""Builds the complete prompt for the Gemini model for current data."""
 	
-	prompt_data = f"--- Raw Data for Analysis (Top 10 Drivers, Race/Session Laps) ---\n{context_data}"
+	prompt_data = f"--- Raw Data for Analysis (Ranking or Pace Data) ---\n{context_data}"
+
+	# Dynamic instructions based on session type
+	is_fast_lap_session = session_key not in ['R', 'S']
+	
+	if is_fast_lap_session:
+		analysis_focus = "Focus your analysis ONLY on the raw speed (Best Time) and potential demonstrated by the drivers. Ignore consistency or long-run pace since this is a **Fastest Lap Ranking**."
+		winner_focus = "raw speed and potential"
+	else:
+		analysis_focus = "Analyze the Average Pace (Avg Time) and Consistency (Var). Var < 1.0 is considered excellent consistency. Focus on who has the best strategic performance for the race distance."
+		winner_focus = "average pace or consistency"
 
 	prompt = f"""
 You are a Senior Formula 1 Strategy Analyst. Your task is to analyze the statistical data of the laps 
@@ -258,11 +310,11 @@ You are a Senior Formula 1 Strategy Analyst. Your task is to analyze the statist
 
 {prompt_data}
 
---- Analysis Guidelines (V33 - Combined R/Q/S Analysis and Context) ---
-1. **Immediate Prediction (Executive Summary):** Select one winner and present the main justification (average pace or consistency) in a single sentence, **in English only**. (Mandatory)
-2. **Overall Performance Summary:** Analyze the Average Pace (Avg Time) and Consistency (Var). Var < 1.0 is considered excellent consistency. Var > 5.0 may indicate inconsistency or race disruptions (such as an accident or red flag).
-3. **Tire and Strategy Deep Dive:** Analyze the data relative to the track. Explain what kind of setup ('High Downforce'/'Low Downforce') is reflected in the data, assuming the Max Speed data of the leading drivers is available in your analysis.
-4. **Weather/Track Influence:** Add general context on track conditions and their effect on tires. Assume stable and warm conditions unless the high Var suggests the use of rain/intermediate tires. 
+--- Analysis Guidelines (V52 - Dynamic Focus) ---
+1. **Immediate Prediction (Executive Summary):** Select one winner and present the main justification ({winner_focus}) in a single sentence, **in English only**. (Mandatory)
+2. **Overall Performance Summary:** {analysis_focus}
+3. **Tire and Strategy Deep Dive:** Analyze the data relative to the track. Explain what kind of setup ('High Downforce'/'Low Downforce') is reflected in the data.
+4. **Weather/Track Influence:** Add general context on track conditions and their effect on tires. Assume stable and warm conditions unless the high Var (only available in Race/Sprint sessions) suggests the use of rain/intermediate tires. 
 5. **Strategic Conclusions and Winner Justification:** Present a summary and clear justification for the winner choice based on data and strategic considerations.
 6. **Confidence Score Table (D5):** Provide a Confidence Score table (in Markdown format) containing the top 5 candidates with a confidence percentage (total percentage must be 100%). **Ensure the table format appears correctly in Markdown**.
 
@@ -283,7 +335,7 @@ Based on: Specific Session Data ({session_name} Combined)
 ## Weather/Track Influence
 ...
 
-## Strategic Conclusions and Winner Justitive
+## Strategic Conclusions and Winner Justification
 ...
 
 ## 📊 Confidence Score Table (D5 - Visual Data)
@@ -304,25 +356,26 @@ def get_preliminary_prediction(current_year, event):
 	previous_year = current_year - 1
 	
 	# V48: Translate Subheader
-	st.subheader("🏁 Data Collection for Preliminary Prediction (Pre-Race Analysis)")
+	st.subheader("🏁 איסוף נתונים לתחזית מוקדמת (Pre-Race Analysis)")
 	
 	# Create the closed expander for all technical reports
 	# V48: Translate Expander Title
-	with st.expander("🛠️ Show Historical and Seasonal Data Loading Details (Diagnostics)", expanded=False):
+	with st.expander("🛠️ הצג פרטי טעינת נתונים היסטוריים ועונתיים (דיאגנוסטיקה)", expanded=False):
 		expander_placeholder = st.container() # Placeholder to pass inside functions
 		
 		with expander_placeholder:
 			# V48: Translate Info Message
-			st.info(f"🔮 Analyzing track dominance: Loading race data for {event} from {previous_year}...")
+			st.info(f"🔮 מנתח דומיננטיות במסלול: מנסה לטעון נתוני מרוץ עבור {event} מ- {previous_year}...")
 			
 			# 1. Load Historical Data (Previous Year on the Same Track)
+			# NOTE: MUST use 'R' here for Race Pace analysis.
 			context_data_prev, session_name_prev = load_and_process_data(previous_year, event, 'R')
 			if context_data_prev:
 				# V48: Translate Success Message
-				st.success(f"✅ Race data for {event} {previous_year} loaded successfully.")
+				st.success(f"✅ נתוני מרוץ עבור {event} {previous_year} נטענו בהצלחה.")
 			else:
 				# V48: Translate Warning Message
-				st.warning(f"⚠️ Warning: No complete historical data found for {event} {previous_year}. ({session_name_prev})")
+				st.warning(f"⚠️ אזהרה: לא נמצאו נתונים היסטוריים מלאים עבור {event} {previous_year} מרוץ. ({session_name_prev})")
 			
 			st.markdown("---")
 		
@@ -372,7 +425,7 @@ def get_preliminary_prediction(current_year, event):
 	# **V43: If there is absolutely no data (neither historical nor seasonal), stop**
 	if not context_data_prev and not race_reports_current:
 		# V48: Translate Error Message
-		st.error("❌ No historical or seasonal data available. Cannot perform analysis.")
+		st.error("❌ לא נמצאו נתונים היסטוריים או עונתיים זמינים. לא ניתן לבצע ניתוח.")
 		return None
 
 
@@ -387,8 +440,8 @@ You are a Senior F1 Analyst. Analyze the following combined data to provide a Pr
 
 --- Analysis Guidelines (V47 - Weight 65/35, Implicit Weather) ---
 1. **Immediate Prediction (Executive Summary):** Select one winner and present the main justification (average pace, consistency, or seasonal trend) in a single sentence, **in English only**. (Mandatory)
-2. **Past Performance Analysis:** Analyze the historical report (previous year on this track). Explain who was dominant in terms of pace and consistency on this track.
-3. **Current Season Trend Analysis:** Analyze the seasonal race reports. **Provide a brief summary of the trend in the balance of power between the leading teams (Red Bull, Ferrari, Mercedes) in the last 3 races.** Who is improving and who is declining?
+2. **Past Performance Analysis:** Analyze the historical report (previous year on this track, **using pace/consistency data**). Explain who was dominant in terms of pace and consistency on this track.
+3. **Current Season Trend Analysis:** Analyze the seasonal race reports. **Provide a brief summary of the trend in the balance of power between the leading teams (Red Bull, Ferrari, Mercedes) in the last 3 races. Who is improving and who is declining?**
 4. **Strategic Conclusions and Winner Justification:** Justify the winner choice based on a combination of **current seasonal capability (65% weight)** and **previous track dominance (35% weight)**. The analysis must reflect this bias.
 5. **Weather & Tire Degradation (Implicit):** Analyze the data and provide a recommended **tire strategy** for the upcoming race (e.g., Hard-Medium-Hard) and an **Pit-Stop Window** analysis. **Assume dry and normal weather conditions,** unless high Var data clearly indicates rain/wet conditions (then state this explicitly).
 6. **Confidence Score Table (D5):** Provide a Confidence Score table (in Markdown format) containing the top 5 candidates with a confidence percentage (total percentage must be 100%). **Ensure the table format appears correctly in Markdown**.
@@ -433,7 +486,7 @@ Based on: {based_on_text}
 		return report
 	except Exception as e:
 		# V48: Translate Error Message
-		st.error(f"❌ Gemini API Error during preliminary prediction creation: {e}")
+		st.error(f"❌ שגיאת Gemini API במהלך יצירת תחזית מוקדמת: {e}")
 		return None
 
 # --- Main Streamlit Function ---
@@ -454,7 +507,7 @@ def main():
 	)
 	
 	# V48: Translate Description & Center Text (UPDATED HERE)
-	st.markdown("<div style='text-align: center; font-size: 3.5em; font-weight: bold;'>Whos on pole?</div>", unsafe_allow_html=True)
+	st.markdown("<div style='text-align: center; font-size: 1.5em; font-weight: bold;'>Whos on pole?</div>", unsafe_allow_html=True)
 	st.markdown("---")
 	
 	# API Key Check
@@ -462,14 +515,14 @@ def main():
 		api_key_check = st.secrets.get("GEMINI_API_KEY")
 		if not api_key_check:
 			# V48: Translate Error Message
-			st.error("❌ Error: Gemini API Key is not configured in Streamlit Secrets. Please set it.")
+			st.error("❌ שגיאה: מפתח Gemini API אינו מוגדר ב-Streamlit Secrets. אנא הגדר אותו.")
 		if not api_key_check:
 			# V48: Translate Warning Message
-			st.warning("⚠️ Note: API Key is missing. The analysis will fail when attempting to connect to Gemini.")
+			st.warning("⚠️ הערה: מפתח ה-API חסר. הניתוח ייכשל בעת ניסיון להתחבר ל-Gemini.")
 
 	except Exception:
 		# V48: Translate Error Message
-		st.error("❌ Error: Failed to read API key. Ensure you have configured it correctly in Secrets.")
+		st.error("❌ שגיאה: קריאת מפתח ה-API נכשלה. ודא שהגדרת אותו נכון ב-Secrets.")
 		
 	st.markdown("---")
 
@@ -478,46 +531,47 @@ def main():
 
 	with col1:
 		# V48: Translate Label
-		selected_year = st.selectbox("Year:", YEARS, index=2, key="select_year") 
+		selected_year = st.selectbox("שנה:", YEARS, index=2, key="select_year") 
 	with col2:
 		# V48: Translate Label
-		selected_event = st.selectbox("Track:", TRACKS, index=5, key="select_event") 
+		selected_event = st.selectbox("מסלול:", TRACKS, index=5, key="select_event") 
 	with col3:
 		# V48: Translate Label
-		selected_session = st.selectbox("Session:", SESSIONS, index=5, key="select_session")
+		selected_session = st.selectbox("סשן:", SESSIONS, index=5, key="select_session")
 	
 	st.markdown("---")
 	
 	# 1. Current Data Analysis Button
 	# V48: Translate Button Text
-	if st.button("🏎️ Predict Winner (Current Session Data)", use_container_width=True, type="primary"):
+	if st.button("🏎️ חזה את המנצח (נתוני סשן נוכחי)", use_container_width=True, type="primary"):
 		
 		# V48: Translate Subheader
-		st.subheader(f"🔄 Starting Analysis: {selected_event} {selected_year} ({selected_session})")
+		st.subheader(f"🔄 מתחיל ניתוח: {selected_event} {selected_year} ({selected_session})")
 		
 		status_placeholder = st.empty()
 		# V48: Translate Info Message
-		status_placeholder.info("...Loading and processing data from FastF1...")
+		status_placeholder.info("...טוען ומעבד נתונים מ-FastF1...")
 		
 		# Load and process data 
 		context_data, status_msg = load_and_process_data(selected_year, selected_event, selected_session)
 
 		if context_data is None:
 			# V48: Translate Error Message
-			status_placeholder.error(f"❌ Error: {status_msg}")
+			status_placeholder.error(f"❌ שגיאה: {status_msg}")
 			return
 		
 		# V48: Translate Success Message
-		status_placeholder.success("✅ Data processed successfully. Sending to AI for analysis...")
+		status_placeholder.success("✅ הנתונים עובדו בהצלחה. שולח ל-AI לניתוח...")
 
 		# Create prompt and get prediction
 		try:
-			prompt = create_prediction_prompt(context_data, selected_year, selected_event, selected_session)
+			# Pass session_key to the prompt creator for dynamic instructions
+			prompt = create_prediction_prompt(context_data, selected_year, selected_event, status_msg, selected_session)
 			
 			prediction_report = get_gemini_prediction(prompt)
 
 			# V48: Translate Success Message
-			status_placeholder.success("🏆 Analysis completed successfully!")
+			status_placeholder.success("🏆 ניתוח הושלם בהצלחה!")
 			st.markdown("---")
 			
 			# Display Report
@@ -525,21 +579,21 @@ def main():
 
 		except APIError as e:
 			# V48: Translate Error Message
-			status_placeholder.error(f"❌ Gemini API Error: Failed to receive response. Details: {e}")
+			status_placeholder.error(f"❌ שגיאת Gemini API במהלך יצירת תחזית: קבלת התגובה נכשלה. פרטים: {e}")
 		except ValueError as e: # Catch API Key errors from get_gemini_prediction
 			# V48: Translate Error Message
-			status_placeholder.error(f"❌ Critical Error: {e}")
+			status_placeholder.error(f"❌ שגיאה קריטית: {e}")
 		except Exception as e:
 			# V48: Translate Error Message
-			status_placeholder.error(f"❌ Unexpected Error: {e}")
+			status_placeholder.error(f"❌ שגיאה בלתי צפויה: {e}")
 
 	st.markdown("---")
 	
 	# 2. Pre-Race Prediction Button
 	# V48: Translate Button Text
-	if st.button("🔮 Preliminary Prediction (Past & Seasonal Context)", use_container_width=True, type="secondary"):
+	if st.button("🔮 תחזית מוקדמת (שילוב עבר וקונטקסט עונתי)", use_container_width=True, type="secondary"):
 		# V48: Translate Subheader
-		st.subheader(f"🔮 Starting Preliminary Prediction: {selected_event} {selected_year}")
+		st.subheader(f"🔮 מתחיל תחזית מוקדמת: {selected_event} {selected_year}")
 		
 		prelim_report = get_preliminary_prediction(selected_year, selected_event)
 		
@@ -550,4 +604,3 @@ def main():
 
 if __name__ == "__main__":
 	main()
-

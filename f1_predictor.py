@@ -6,7 +6,7 @@ from google import genai
 from google.genai.errors import APIError
 from tenacity import retry, stop_after_attempt, wait_exponential
 import io 
-from datetime import date, datetime 
+from datetime import date 
 import numpy as np 
 
 # --- Initial Setup ---
@@ -57,116 +57,108 @@ def get_gemini_prediction(prompt):
 
 # No Streamlit Caching
 def load_and_process_data(year, event, session_key):
-	"""Loads data from FastF1 and performs initial processing."""
+	"""
+    Loads data from FastF1. 
+    Returns: (context_text, session_name_string) or (None, error_message)
+    """
 
 	try:
 		session = fastf1.get_session(year, event, session_key)
 		
 		# Robust Session.load() attempt
 		try:
-			# Basic load attempt (laps only)
+			# 1. Basic load attempt (we only want laps)
 			session.load(laps=True, telemetry=False, weather=False, messages=False, pit_stops=False)
 		except TypeError as e:
+			# 2. Fallback for older FastF1 versions
 			if "unexpected keyword argument" in str(e):
 					session.load()
 			else:
 					raise e 
 		except Exception as e:
-			# General fallback
-			if "not loaded yet" in str(e):
+			# 3. General error handling
+			error_message = str(e)
+			if "not loaded yet" in error_message:
 					session.load(telemetry=False, weather=False, messages=False, laps=True, pit_stops=False)
 			else:
 					raise e
 
 		# Robustness Check
 		if session.laps is None or session.laps.empty or not isinstance(session.laps, pd.DataFrame):
-			return None, f"Insufficient data for {year} {event} {session_key}."
+			return None, f"Insufficient data for {year} {event} {session_key}. FastF1 'load_laps' error."
 
 	except Exception as e:
 		error_message = str(e)
-		if "Failed to load" in error_message or "schedule" in error_message:
-				return None, f"FastF1: Data not available/loaded for {event} {year} {session_key}."
+        # Filter out common FastF1 error messages for cleaner UI
+		if "Failed to load any schedule data" in error_message or "schedule data" in error_message:
+				return None, f"FastF1: Failed to load data. Check if the session has occurred yet."
 		if "not found" in error_message:
-				return None, f"Event not found: {year} {event}."
-		return None, f"Error: {error_message}"
+				return None, f"Data not found for {year} {event} {session_key}."
+		return None, f"General FastF1 Loading Error: {error_message}"
 
 	laps = session.laps.reset_index(drop=True)
 
-	# --- FIX: Filter Laps Correctly (Solves KeyError: 'IsGood') ---
-    # Try to use IsAccurate. If IsGood exists (newer FastF1), use that too if needed, but IsAccurate is safer.
-	if 'IsAccurate' in laps.columns:
-		clean_laps = laps.loc[laps['IsAccurate'] == True]
-	elif 'IsGood' in laps.columns:
-		clean_laps = laps.loc[laps['IsGood'] == True]
-	else:
-		# Fallback if no accuracy column found
-		clean_laps = laps
-
-	# Common filters
-	clean_laps = clean_laps.loc[
-		(clean_laps['LapTime'].notna()) &
-		(clean_laps['Driver'] != 'OUT') &
-		(clean_laps['Team'].notna())
+	# Required lap filtering
+	laps_filtered = laps.loc[
+		(laps['IsGood'] == True) & 
+		(laps['LapTime'].notna()) & 
+		(laps['Driver'] != 'OUT') & 
+		(laps['Team'].notna()) & 
+		(laps['Time'].notna()) 
 	].copy()
 
-	clean_laps['LapTime_s'] = clean_laps['LapTime'].dt.total_seconds()
+	laps_filtered['LapTime_s'] = laps_filtered['LapTime'].dt.total_seconds()
 
-	# --- FIX: Split Logic for Race vs Quali/Practice ---
+	# 5. Calculate statistics
 	
-	# CASE 1: RACE / SPRINT (Long Run Analysis)
+	# **V55 FIX: Determine the ranking metric based on session type**
 	if session_key in ["R", "S"]:
-		driver_stats = clean_laps.groupby('Driver').agg(
-			Best_Time=('LapTime', 'min'),
-			Avg_Time=('LapTime', 'mean'),
-			Var=('LapTime_s', lambda x: np.var(x) if len(x) >= 2 else np.nan),
-			Laps=('LapTime', 'count')
-		).reset_index()
-		
-		driver_stats['Best_Time_s'] = driver_stats['Best_Time'].dt.total_seconds()
-		driver_stats['Avg_Time_s'] = driver_stats['Avg_Time'].dt.total_seconds()
-		
-		# Filter drivers with too few laps for valid pace analysis
-		driver_stats = driver_stats[driver_stats['Laps'] >= 3]
-		driver_stats = driver_stats[driver_stats['Var'].notna()]
-		
-		# Rank by Average Pace
-		driver_stats = driver_stats.sort_values(by='Avg_Time_s', ascending=True).head(10)
-
-	# CASE 2: QUALIFYING / PRACTICE (Fastest Lap Analysis)
+		# For race/sprint sessions, prioritize average pace
+		ranking_column = 'Avg_Time_s'
 	else:
-		# Just find the minimum lap time per driver
-		driver_stats = clean_laps.groupby('Driver').agg(
-			Best_Time=('LapTime', 'min'),
-			Laps=('LapTime', 'count')
-		).reset_index()
+		# For practice/qualifying, prioritize fastest lap (Best_Time_s) - CRITICAL for Qualifying accuracy
+		ranking_column = 'Best_Time_s'
 		
-		driver_stats['Best_Time_s'] = driver_stats['Best_Time'].dt.total_seconds()
-		driver_stats['Avg_Time'] = pd.NaT # Not relevant
-		driver_stats['Var'] = 0.0 # Not relevant
-		
-		# Rank by Best Time (Fastest Lap)
-		driver_stats = driver_stats.sort_values(by='Best_Time_s', ascending=True).head(10)
+	# Calculate necessary stats
+	driver_stats = laps_filtered.groupby('Driver').agg(
+		Best_Time=('LapTime', 'min'),
+		Avg_Time=('LapTime', 'mean'),
+		Var=('LapTime_s', lambda x: np.var(x) if len(x) >= 2 else np.nan),
+		Laps=('LapTime', 'count')
+	).reset_index()
 
+	driver_stats['Best_Time_s'] = driver_stats['Best_Time'].dt.total_seconds()
+	driver_stats['Avg_Time_s'] = driver_stats['Avg_Time'].dt.total_seconds()
 
+    # Filter drivers with very few laps only for Race sessions to avoid skewing
+	if session_key in ["R", "S"]:
+		driver_stats = driver_stats[driver_stats['Laps'] >= 3] 
+	
 	if driver_stats.empty:
-		return None, f"Insufficient data for analysis in {session_key}."
+		return None, f"Insufficient data for statistical analysis in {session_key}."
 
-	# Format Output
+	# Process data to text format (Top 10)
 	data_lines = []
-	for index, row in driver_stats.iterrows():
-		best_str = str(row['Best_Time']).split('0 days ')[-1][:11] # Trim
-		if session_key in ["R", "S"]:
-			# Show Avg for Race
-			avg_str = str(row['Avg_Time']).split('0 days ')[-1][:11]
-			data_lines.append(f"POS {index+1}: {row['Driver']} | Best: {best_str} | Avg: {avg_str} | Var: {row['Var']:.3f} | Laps: {int(row['Laps'])}")
-		else:
-			# Show only Best for Quali
-			data_lines.append(f"POS {index+1}: {row['Driver']} | Best: {best_str} | Laps: {int(row['Laps'])}")
+	
+	# Rank the drivers based on the selected metric
+	driver_stats_ranked = driver_stats.sort_values(by=ranking_column, ascending=True).head(10)
+	
+	for index, row in driver_stats_ranked.iterrows():
+		# Format time strings
+		best_time_str = str(row['Best_Time']).split('0 days ')[-1][:10] if row['Best_Time'] is not pd.NaT else 'N/A'
+		avg_time_str = str(row['Avg_Time']).split('0 days ')[-1][:10] if row['Avg_Time'] is not pd.NaT else 'N/A'
+		
+		# Data is now sent based on the full statistical profile
+		data_lines.append(
+			f"POS {index+1}: {row['Driver']} | Best: {best_time_str} | Avg: {avg_time_str} | Var: {row['Var']:.3f} | Laps: {int(row['Laps'])}"
+		)
 
 	context_data = "\n".join(data_lines)
+
 	return context_data, session.name
 
 
+# --- NEW: Function to find the latest race (Added back!) ---
 @st.cache_data(ttl=3600)
 def get_latest_completed_race():
     """
@@ -208,7 +200,7 @@ def find_last_three_races_data(current_year, event, expander_placeholder):
 	"""Finds the last three 'conventional' races that should have occurred this season."""
 
 	with expander_placeholder.container():
-		st.info("🔄 Starting seasonal data collection (Last 3 Races)")
+		st.info("🔄 Starting Seasonal Data Collection (Last 3 Races)")
 		
 		try:
 			schedule = fastf1.get_event_schedule(current_year)

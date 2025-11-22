@@ -301,7 +301,7 @@ Based on: Specific Session Data ({session_name} Combined)
 | Driver | Confidence Score (%) |
 |:--- | :--- |
 | ... | :--- |
-| ... | ... |
+| ... | :--- |
 | ... | ... |
 | ... | ... |
 | ... | ... |
@@ -464,7 +464,8 @@ def main():
 	)
 
 	# V52: Center the 'Whos on pole?' text and use a suitable font size
-	st.markdown("<div style='text-align: center; font-size: 1.5em; font-weight: bold;'>Who's on Pole?</div>", unsafe_allow_html=True)
+	# **FIXED:** Centering using an H1 tag for proper centering and visibility
+	st.markdown("<h1 style='text-align: center; font-size: 2em; font-weight: bold; margin-bottom: 10px;'>Who's on Pole?</h1>", unsafe_allow_html=True)
 	st.markdown("---")
 
 	# API Key Check
@@ -484,7 +485,8 @@ def main():
 	st.markdown("---")
 
 	# Parameter Selection
-	col1, col2 = st.columns(2) # Reduced to two columns to center the selectboxes
+	# **FIXED V57: Removed the 'Session' dropdown, as requested, for full automation**
+	col1, col2 = st.columns(2) 
 
 	with col1:
 		# Translate Label
@@ -492,8 +494,6 @@ def main():
 	with col2:
 		# Translate Label
 		selected_event = st.selectbox("Track:", TRACKS, index=5, key="select_event")
-
-	# The session dropdown is removed, as requested, for full automation.
 
 	st.markdown("---")
 
@@ -528,7 +528,6 @@ def main():
 		status_placeholder.info("...Loading and processing data from FastF1...")
 
 		# Load and process data (using the successful context_data loaded in the loop)
-		# Note: The data is already loaded in the loop, so we only proceed to analysis.
 		
 		# Translate Success Message
 		status_placeholder.success(f"✅ Data processed successfully for {selected_session}. Sending to AI for analysis...")
@@ -554,7 +553,7 @@ def main():
 			status_placeholder.error(f"❌ Critical Error: {e}")
 		except Exception as e:
 			# Translate Error Message
-			status_placeholder.error(f"❌ Unexpected Error: {e}")
+			st.error(f"❌ Unexpected Error: {e}")
 
 	st.markdown("---")
 

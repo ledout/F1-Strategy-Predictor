@@ -26,7 +26,6 @@ TRACKS = ["Bahrain", "Saudi Arabia", "Australia", "Imola", "Miami", "Monaco",
 		  "Netherlands", "Monza", "Singapore", "Japan", "Qatar", "United States", 
 		  "Mexico", "Brazil", "Las Vegas", "Abu Dhabi", "China", "Turkey", 
 		  "France"]
-# סדר עדיפות לסשן האוטומטי: R הוא העדיפות הגבוהה ביותר
 SESSIONS_PRIORITY = ["R", "Q", "FP3", "FP2", "FP1"] 
 YEARS = [2025, 2024, 2023, 2022, 2021, 2020]
 MODEL_NAME = "gemini-2.5-flash"
@@ -116,7 +115,7 @@ def load_and_process_data(year, event, session_key):
 
 	# 5. Calculate statistics
 	
-	# **V55 FIX: Determine the ranking metric based on session type**
+	# Determine the ranking metric based on session type
 	if session_key in ["R", "S"]:
 		# For race/sprint sessions, prioritize average pace (lower is better)
 		ranking_column = 'Avg_Time_s'
@@ -264,8 +263,7 @@ def create_prediction_prompt(context_data, year, event, session_name):
 	prompt_data = f"--- Raw Data for Analysis (Top 10 Drivers, Race/Session Laps) ---\n{context_data}"
 
 	prompt = f"""
-You are a Senior Formula 1 Strategy Analyst. Your task is to analyze the statistical data of the laps 
-({session_name}, {event} {year}) and provide a complete strategic report and winner prediction.
+You are a Senior F1 Analyst. Analyze the following combined data to provide a Preliminary (Pre-Race) Prediction Report for **{event} {year} Race**.
 
 {prompt_data}
 
@@ -464,8 +462,7 @@ def main():
 	)
 
 	# V52: Center the 'Whos on pole?' text and use a suitable font size
-	# **FIXED:** Centering using an H1 tag for proper centering and visibility
-	st.markdown("<h1 style='text-align: center; font-size: 2em; font-weight: bold; margin-bottom: 10px;'>Who's on Pole?</h1>", unsafe_allow_html=True)
+	st.markdown("<div style='text-align: center; font-size: 1.5em; font-weight: bold;'>Who's on Pole?</div>", unsafe_allow_html=True)
 	st.markdown("---")
 
 	# API Key Check
@@ -528,6 +525,7 @@ def main():
 		status_placeholder.info("...Loading and processing data from FastF1...")
 
 		# Load and process data (using the successful context_data loaded in the loop)
+		# Note: The data is already loaded in the loop, so we only proceed to analysis.
 		
 		# Translate Success Message
 		status_placeholder.success(f"✅ Data processed successfully for {selected_session}. Sending to AI for analysis...")

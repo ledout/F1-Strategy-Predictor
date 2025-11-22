@@ -15,6 +15,7 @@ logging.getLogger('fastf1').setLevel(logging.ERROR)
 
 # **Disable FastF1 Local Cache**
 try:
+	# Setting Cache Path to None disables the local FastF1 cache.
 	fastf1.set_cache_path(None)
 except Exception:
 	pass
@@ -25,7 +26,8 @@ TRACKS = ["Bahrain", "Saudi Arabia", "Australia", "Imola", "Miami", "Monaco",
 		  "Netherlands", "Monza", "Singapore", "Japan", "Qatar", "United States",
 		  "Mexico", "Brazil", "Las Vegas", "Abu Dhabi", "China", "Turkey",
 		  "France"]
-SESSIONS_PRIORITY = ["R", "Q", "FP3", "FP2", "FP1"] # סדר עדיפות לסשן האוטומטי
+# סדר עדיפות לסשן האוטומטי: מרוץ (R) הוא העדיפות הגבוהה ביותר
+SESSIONS_PRIORITY = ["R", "Q", "FP3", "FP2", "FP1"] 
 YEARS = [2025, 2024, 2023, 2022, 2021, 2020]
 MODEL_NAME = "gemini-2.5-flash"
 IMAGE_HEADER_URL = "https://raw.githubusercontent.com/ledout/F1-Strategy-Predictor/main/F1-App.png"
@@ -57,7 +59,27 @@ def load_and_process_data(year, event, session_key):
 
 	try:
 		session = fastf1.get_session(year, event, session_key)
-		session.load(laps=True, telemetry=False, weather=False, messages=False, pit_stops=False)
+
+		# Robust Session.load() attempt for different FastF1 versions
+		try:
+			# 1. Basic load attempt (we only want laps)
+			session.load(laps=True, telemetry=False, weather=False, messages=False, pit_stops=False)
+		except TypeError as e:
+			# 2. If it fails due to unexpected arguments, try loading without any arguments.
+			if "unexpected keyword argument" in str(e):
+					# Let FastF1 load everything if the arguments don't work
+					session.load()
+			else:
+					# If it's another type error, re-raise it
+					raise e
+		except Exception as e:
+			# General loading error - explicit flag path
+			error_message = str(e)
+			if "not loaded yet" in error_message:
+					# Explicit load attempt if there's a metadata issue
+					session.load(telemetry=False, weather=False, messages=False, laps=True, pit_stops=False)
+			else:
+					raise e
 
 		# Robustness Check: Ensure session.laps is a valid DataFrame
 		if session.laps is None or session.laps.empty or not isinstance(session.laps, pd.DataFrame):
@@ -81,17 +103,28 @@ def load_and_process_data(year, event, session_key):
 
 	# Required lap filtering for accuracy
 	laps_filtered = laps.loc[
-		(laps['IsAccurate'] == True) &
+		(laps['IsGood'] == True) & # Use IsGood for robust filtering
 		(laps['LapTime'].notna()) &
 		(laps['Driver'] != 'OUT') &
 		(laps['Team'].notna()) &
-		(laps['Time'].notna()) &
-		(laps['Sector1SessionTime'].notna())
+		(laps['Time'].notna()) 
 	].copy()
 
 	laps_filtered['LapTime_s'] = laps_filtered['LapTime'].dt.total_seconds()
 
 	# 5. Calculate statistics
+	
+	# --- V53 FIX: Use Best_Time_s for ranking in FP/Q; use Avg_Time_s for R/S ---
+	
+	# Determine the ranking metric based on session type
+	if session_key in ["R", "S"]:
+		# For race sessions, prioritize average pace (lower is better)
+		ranking_column = 'Avg_Time_s'
+	else:
+		# For practice/qualifying, prioritize fastest lap (lower is better)
+		ranking_column = 'Best_Time_s'
+		
+	# Calculate necessary stats
 	driver_stats = laps_filtered.groupby('Driver').agg(
 		Best_Time=('LapTime', 'min'),
 		Avg_Time=('LapTime', 'mean'),
@@ -112,16 +145,6 @@ def load_and_process_data(year, event, session_key):
 
 	# Process data to text format (Top 10)
 	data_lines = []
-	
-	# **V53 FIX: Use Best_Time_s for ranking in FP/Q; use Avg_Time_s for R/S**
-	
-	# Determine the ranking metric
-	if session_key in ["R", "S"]:
-		# For race sessions, prioritize average pace (lower is better)
-		ranking_column = 'Avg_Time_s'
-	else:
-		# For practice/qualifying, prioritize fastest lap (lower is better)
-		ranking_column = 'Best_Time_s'
 	
 	# Rank the drivers based on the selected metric
 	driver_stats_ranked = driver_stats.sort_values(by=ranking_column, ascending=True).head(10)
@@ -192,30 +215,174 @@ Based on: Specific Session Data ({session_name} Combined)
 	return prompt
 
 
+def find_last_three_races_data(current_year, event, expander_placeholder):
+	"""Finds the last three 'conventional' races that should have occurred this season and returns their race data."""
+
+	with expander_placeholder.container():
+		st.info("🔄 Starting seasonal data collection (Last 3 Races)")
+		
+		schedule = None
+		current_event_date = pd.to_datetime(date.today()) # Set default to today's date
+		
+		try:
+			schedule = fastf1.get_event_schedule(current_year)
+			if schedule.empty:
+				return [], "Error: Current year's schedule is empty." 
+
+		except Exception as e:
+			return [], f"Error: Failed to load current year's schedule. {e}" 
+		
+		
+		# 1. Find the current event
+		current_event = schedule[schedule['EventName'] == event]
+		
+		# Robust handling if the current event is missing from the Schedule
+		if current_event.empty:
+			st.warning(f"⚠️ Warning: Current event ({event}) not found in the full schedule. Using today's date ({current_event_date.strftime('%Y-%m-%d')}) as a seasonal reference point.")
+			
+			# If the selected year is in the future (e.g., 2025), this might fail.
+			if current_year > date.today().year:
+				st.error("❌ Cannot perform seasonal analysis for a future year without a defined event date.")
+				return [], "❌ Cannot perform seasonal analysis for a future year."
+			
+		else:
+			try:
+				# Event found, use its information
+				current_event_date = current_event['EventDate'].iloc[0]
+				
+				current_event_round = current_event['RoundNumber'].iloc[0]
+				
+				# 2. Check round number - only if the event was found
+				if current_event_round <= 4:
+					st.warning(f"⚠️ Warning: Current event ({event}) is one of the first 4 races of the season. Insufficient seasonal context. Skipping.")
+					return [], "Seasonal skip (Race too early in the season)." 
+			except KeyError as e:
+				# If a column is missing in the Schedule
+				st.error(f"FastF1 Schedule Error: Missing column ({e}). Using today's date.")
+				# Continue with current_event_date = date.today()
+			except Exception as e:
+				# Another unexpected Schedule error
+				st.error(f"Unexpected Schedule error: {e}")
+				return [], "FastF1 Schedule Error."
+		
+		
+		# 3. Filter races based on date (or today's date if the event was not found)
+		try:
+			# Filter based on the current event date
+			potential_races = schedule.loc[
+				(schedule['EventFormat'] == 'conventional') &
+				(schedule['EventDate'] < current_event_date)
+			].sort_values(by='EventDate', ascending=False).head(3) 
+		except KeyError as e:
+			return [], f"FastF1: Missing column ({e}). Cannot perform seasonal analysis."
+		
+		
+		if potential_races.empty:
+			st.warning(f"No previous conventional races found in the {current_year} schedule before {event}.")
+			return [], f"No previous races in {current_year}." 
+		
+		race_reports = []
+		
+		for index, race in potential_races.iterrows():
+			event_name = race['EventName']
+			st.info(f"🔮 Attempting to load Race Data: {event_name} {current_year}...")
+			
+			# Attempt to load data
+			context_data, session_name = load_and_process_data(current_year, event_name, 'R')
+			
+			if context_data:
+				report = (
+					f"--- Pace Report: {event_name} {current_year} Race (Seasonal Context) ---\n"
+					f"{context_data}\n"
+				)
+				race_reports.append(report)
+				st.success(f"✅ Race data for {event_name} loaded successfully.")
+			else:
+				# If load_and_process_data fails
+				st.warning(f"⚠️ Could not load complete race data for {event_name}. AI will ignore this race. (Error: {session_name})") 
+
+		if not race_reports:
+			# Returns a seasonal failure status
+			return [], f"No complete seasonal data found in {current_year}." 
+		
+		st.success("✅ Seasonal data processed successfully. Proceeding to AI.")
+		return race_reports, "Seasonal data loaded"
+
+
+def create_prediction_prompt(context_data, year, event, session_name):
+	"""Builds the complete prompt for the Gemini model for current data."""
+
+	prompt_data = f"--- Raw Data for Analysis (Top 10 Drivers, Race/Session Laps) ---\n{context_data}"
+
+	prompt = f"""
+You are a Senior F1 Analyst. Analyze the following combined data to provide a Preliminary (Pre-Race) Prediction Report for **{event} {year} Race**.
+
+{prompt_data}
+
+--- Analysis Guidelines (V33 - Combined R/Q/S Analysis and Context) ---
+1. **Immediate Prediction (Executive Summary):** Select one winner and present the main justification (average pace or consistency) in a single sentence, **in English only**. (Mandatory)
+2. **Overall Performance Summary:** Analyze the Average Pace (Avg Time) and Consistency (Var). Var < 1.0 is considered excellent consistency. Var > 5.0 may indicate inconsistency or race disruptions (such as an accident or red flag).
+3. **Tire and Strategy Deep Dive:** Analyze the data relative to the track. Explain what kind of setup ('High Downforce'/'Low Downforce') is reflected in the data, assuming the Max Speed data of the leading drivers is available in your analysis.
+4. **Weather/Track Influence:** Add general context on track conditions and their effect on tires. Assume stable and warm conditions unless the high Var suggests the use of rain/intermediate tires. 
+5. **Strategic Conclusions and Winner Justification:** Present a summary and clear justification for the winner choice based on data and strategic considerations.
+6. **Confidence Score Table (D5):** Provide a Confidence Score table (in Markdown format) containing the top 5 candidates with a confidence percentage (total percentage must be 100%). **Ensure the table format appears correctly in Markdown**.
+
+--- Mandatory Output Format (Markdown, English for the entire report) ---
+🏎️ Strategy Report: {event} {year}
+
+Based on: Specific Session Data ({session_name} Combined)
+
+## Immediate Prediction (Executive Summary)
+...
+
+## Overall Performance Summary
+...
+
+## Tire and Strategy Deep Dive
+...
+
+## Weather/Track Influence
+...
+
+## Strategic Conclusions and Winner Justification
+...
+
+## 📊 Confidence Score Table (D5 - Visual Data)
+| Driver | Confidence Score (%) |
+|:--- | :--- |
+| ... | :--- |
+| ... | ... |
+| ... | ... |
+| ... | ... |
+| ... | ... |
+"""
+	return prompt
+
+
 def get_preliminary_prediction(current_year, event):
 	"""Combines race data from the previous year and the last three races of the current season to create a stronger pre-race prediction."""
 
 	previous_year = current_year - 1
 
-	# Translate Subheader
+	# V48: Translate Subheader
 	st.subheader("🏁 Data Collection for Preliminary Prediction (Pre-Race Analysis)")
 
 	# Create the closed expander for all technical reports
-	# Translate Expander Title
+	# V48: Translate Expander Title
 	with st.expander("🛠️ Show Historical and Seasonal Data Loading Details (Diagnostics)", expanded=False):
 		expander_placeholder = st.container() # Placeholder to pass inside functions
 
 		with expander_placeholder:
-			# Translate Info Message
+			# V48: Translate Info Message
 			st.info(f"🔮 Analyzing track dominance: Loading race data for {event} from {previous_year}...")
 
 			# 1. Load Historical Data (Previous Year on the Same Track)
 			context_data_prev, session_name_prev = load_and_process_data(previous_year, event, 'R')
 			if context_data_prev:
-				# Translate Success Message
+				# V48: Translate Success Message
 				st.success(f"✅ Race data for {event} {previous_year} loaded successfully.")
 			else:
-				# Translate Warning Message
+				# V48: Translate Warning Message
 				st.warning(f"⚠️ Warning: No complete historical data found for {event} {previous_year}. ({session_name_prev})")
 
 			st.markdown("---")
@@ -424,7 +591,7 @@ def main():
 			status_placeholder.error(f"❌ Critical Error: {e}")
 		except Exception as e:
 			# Translate Error Message
-			st.error(f"❌ Unexpected Error: {e}")
+			status_placeholder.error(f"❌ Unexpected Error: {e}")
 
 	st.markdown("---")
 

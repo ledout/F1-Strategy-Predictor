@@ -163,6 +163,7 @@ def load_and_process_data(year, event, session_key):
 	return context_data, session.name
 
 
+@st.cache_data(ttl=3600)
 def get_latest_completed_race():
     """
     V59 FIX: Tries to find the latest completed conventional F1 race across all years 
@@ -175,7 +176,8 @@ def get_latest_completed_race():
     # Start searching from the current year backwards
     for year in sorted(YEARS, reverse=True):
         try:
-            schedule = fastf1.get_event_schedule(year)
+            # We don't need to load the full schedule, just get the event list
+            schedule = fastf1.get_events(year=year)
             
             # Filter for completed conventional races
             completed_races = schedule.loc[
@@ -203,7 +205,7 @@ def find_last_three_races_data(current_year, event, expander_placeholder):
 	"""Finds the last three 'conventional' races that should have occurred this season and returns their race data."""
 
 	with expander_placeholder.container():
-		st.info("🔄 Starting Seasonal Data Collection (Last 3 Races)")
+		st.info("🔄 Starting seasonal data collection (Last 3 Races)")
 		
 		schedule = None
 		current_event_date = pd.to_datetime(date.today()) # Set default to today's date
@@ -299,8 +301,7 @@ def create_prediction_prompt(context_data, year, event, session_name):
 	prompt_data = f"--- Raw Data for Analysis (Top 10 Drivers, Race/Session Laps) ---\n{context_data}"
 
 	prompt = f"""
-You are a Senior F1 Analyst. Your task is to analyze the statistical data of the laps 
-({session_name}, {event} {year}) and provide a complete strategic report and winner prediction.
+You are a Senior F1 Analyst. Analyze the following combined data to provide a Preliminary (Pre-Race) Prediction Report for **{event} {year} Race**.
 
 {prompt_data}
 
@@ -320,16 +321,16 @@ Based on: Specific Session Data ({session_name} Combined)
 ## Immediate Prediction (Executive Summary)
 ...
 
-## Overall Performance Summary
+## Past Performance Analysis
 ...
 
-## Tire and Strategy Deep Dive
-...
-
-## Weather/Track Influence
+## Current Season Trend Analysis
 ...
 
 ## Strategic Conclusions and Winner Justification
+...
+
+## 🏎️ Recommended Strategy & Pit-Stop Window
 ...
 
 ## 📊 Confidence Score Table (D5 - Visual Data)

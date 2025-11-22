@@ -26,7 +26,7 @@ TRACKS = ["Bahrain", "Saudi Arabia", "Australia", "Imola", "Miami", "Monaco",
 		  "Netherlands", "Monza", "Singapore", "Japan", "Qatar", "United States", 
 		  "Mexico", "Brazil", "Las Vegas", "Abu Dhabi", "China", "Turkey", 
 		  "France"]
-# סדר עדיפות לסשן האוטומטי: מרוץ (R) הוא העדיפות הגבוהה ביותר
+# סדר עדיפות לסשן האוטומטי: R הוא העדיפות הגבוהה ביותר
 SESSIONS_PRIORITY = ["R", "Q", "FP3", "FP2", "FP1"] 
 YEARS = [2025, 2024, 2023, 2022, 2021, 2020]
 MODEL_NAME = "gemini-2.5-flash"
@@ -39,7 +39,7 @@ IMAGE_HEADER_URL = "https://raw.githubusercontent.com/ledout/F1-Strategy-Predict
 @retry(wait=wait_exponential(multiplier=1, min=2, max=10), stop=stop_after_attempt(3))
 def get_gemini_prediction(prompt):
 	"""Sends the prompt to Gemini Flash using the API key from Secrets."""
-	
+
 	try:
 		api_key = st.secrets.get("GEMINI_API_KEY")
 		if not api_key:
@@ -121,7 +121,7 @@ def load_and_process_data(year, event, session_key):
 		# For race/sprint sessions, prioritize average pace (lower is better)
 		ranking_column = 'Avg_Time_s'
 	else:
-		# For practice/qualifying, prioritize fastest lap (Best_Time_s)
+		# For practice/qualifying, prioritize fastest lap (Best_Time_s) - CRITICAL FOR Q/FP ACCURACY
 		ranking_column = 'Best_Time_s'
 		
 	# Calculate necessary stats
@@ -168,7 +168,7 @@ def find_last_three_races_data(current_year, event, expander_placeholder):
 	"""Finds the last three 'conventional' races that should have occurred this season and returns their race data."""
 
 	with expander_placeholder.container():
-		st.info("🔄 Starting Seasonal Data Collection (Last 3 Races)")
+		st.info("🔄 Starting seasonal data collection (Last 3 Races)")
 		
 		schedule = None
 		current_event_date = pd.to_datetime(date.today()) # Set default to today's date
@@ -314,25 +314,25 @@ def get_preliminary_prediction(current_year, event):
 
 	previous_year = current_year - 1
 
-	# V48: Translate Subheader
+	# Translate Subheader
 	st.subheader("🏁 Data Collection for Preliminary Prediction (Pre-Race Analysis)")
 
 	# Create the closed expander for all technical reports
-	# V48: Translate Expander Title
+	# Translate Expander Title
 	with st.expander("🛠️ Show Historical and Seasonal Data Loading Details (Diagnostics)", expanded=False):
 		expander_placeholder = st.container() # Placeholder to pass inside functions
 
 		with expander_placeholder:
-			# V48: Translate Info Message
+			# Translate Info Message
 			st.info(f"🔮 Analyzing track dominance: Loading race data for {event} from {previous_year}...")
 
 			# 1. Load Historical Data (Previous Year on the Same Track)
 			context_data_prev, session_name_prev = load_and_process_data(previous_year, event, 'R')
 			if context_data_prev:
-				# V48: Translate Success Message
+				# Translate Success Message
 				st.success(f"✅ Race data for {event} {previous_year} loaded successfully.")
 			else:
-				# V48: Translate Warning Message
+				# Translate Warning Message
 				st.warning(f"⚠️ Warning: No complete historical data found for {event} {previous_year}. ({session_name_prev})")
 
 			st.markdown("---")
@@ -492,9 +492,9 @@ def main():
 	with col2:
 		# Translate Label
 		selected_event = st.selectbox("Track:", TRACKS, index=5, key="select_event")
-	
+
 	# The session dropdown is removed, as requested, for full automation.
-	
+
 	st.markdown("---")
 
 	# 1. Current Data Analysis Button
@@ -503,16 +503,20 @@ def main():
 
 		# Logic to automatically find the latest session (R -> Q -> FP3 -> FP2 -> FP1)
 		selected_session = None
+		context_data = None
+		status_msg = ""
+		
 		for session_type in SESSIONS_PRIORITY:
 			# Try to load the data for the most recent session
-			context_data, status_msg = load_and_process_data(selected_year, selected_event, session_type)
+			temp_context_data, temp_status_msg = load_and_process_data(selected_year, selected_event, session_type)
 			
-			if context_data:
+			if temp_context_data:
 				selected_session = session_type
+				context_data = temp_context_data
 				break # Found data, exit loop
 
 		if not selected_session:
-			status_msg = "Error: Failed to find valid data for any session (R, Q, FP3, FP2, FP1) for this event. Try selecting a different year or track."
+			status_msg = f"Error: Failed to find valid data for any session ({'/'.join(SESSIONS_PRIORITY)}) for this event. Try selecting a different year or track."
 			st.error(f"❌ {status_msg}")
 			return
 
@@ -550,7 +554,7 @@ def main():
 			status_placeholder.error(f"❌ Critical Error: {e}")
 		except Exception as e:
 			# Translate Error Message
-			st.error(f"❌ Unexpected Error: {e}")
+			status_placeholder.error(f"❌ Unexpected Error: {e}")
 
 	st.markdown("---")
 

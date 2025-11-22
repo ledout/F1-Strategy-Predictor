@@ -26,7 +26,8 @@ TRACKS = ["Bahrain", "Saudi Arabia", "Australia", "Imola", "Miami", "Monaco",
 		  "Netherlands", "Monza", "Singapore", "Japan", "Qatar", "United States", 
 		  "Mexico", "Brazil", "Las Vegas", "Abu Dhabi", "China", "Turkey", 
 		  "France"]
-SESSIONS = ["FP1", "FP2", "FP3", "Q", "S", "R"]
+# סדר עדיפות לסשן האוטומטי: מרוץ (R) הוא העדיפות הגבוהה ביותר
+SESSIONS_PRIORITY = ["R", "Q", "FP3", "FP2", "FP1"] 
 YEARS = [2025, 2024, 2023, 2022, 2021, 2020]
 MODEL_NAME = "gemini-2.5-flash"
 # Custom Header Image URL (Converted to RAW format for proper loading)
@@ -57,7 +58,7 @@ def get_gemini_prediction(prompt):
 # No Streamlit Caching
 def load_and_process_data(year, event, session_key):
 	"""Loads data from FastF1 and performs initial processing, with error handling for session.load()."""
-	
+
 	try:
 		session = fastf1.get_session(year, event, session_key)
 		
@@ -81,14 +82,14 @@ def load_and_process_data(year, event, session_key):
 					session.load(telemetry=False, weather=False, messages=False, laps=True, pit_stops=False)
 			else:
 					raise e
-		
+
 		# Robustness Check: Ensure session.laps is a valid DataFrame
 		if session.laps is None or session.laps.empty or not isinstance(session.laps, pd.DataFrame):
 			return None, f"Insufficient data for {year} {event} {session_key}. FastF1 'load_laps' error."
-			
+
 	except Exception as e:
 		error_message = str(e)
-		
+
 		if "Failed to load any schedule data" in error_message or "schedule data" in error_message:
 				return None, f"FastF1: Failed to load any schedule data. Error loading FastF1: Possible network/connection issue or the year/track does not exist."
 
@@ -115,12 +116,12 @@ def load_and_process_data(year, event, session_key):
 
 	# 5. Calculate statistics
 	
-	# Determine the ranking metric based on session type
+	# **V55 FIX: Determine the ranking metric based on session type**
 	if session_key in ["R", "S"]:
-		# For race sessions, prioritize average pace (lower is better)
+		# For race/sprint sessions, prioritize average pace (lower is better)
 		ranking_column = 'Avg_Time_s'
 	else:
-		# For practice/qualifying, prioritize fastest lap (lower is better)
+		# For practice/qualifying, prioritize fastest lap (Best_Time_s)
 		ranking_column = 'Best_Time_s'
 		
 	# Calculate necessary stats
@@ -135,17 +136,18 @@ def load_and_process_data(year, event, session_key):
 	driver_stats['Avg_Time_s'] = driver_stats['Avg_Time'].dt.total_seconds()
 
 	# Only include stats if 5 or more laps were completed and variance is calculated
+	# (This remains a minimum threshold for reliable data)
 	driver_stats = driver_stats[driver_stats['Laps'] >= 5]
 	driver_stats = driver_stats[driver_stats['Var'].notna()] # Remove drivers with no variance
 
 	
 	if driver_stats.empty:
-		return None, "Insufficient data (fewer than 5 laps per driver) for statistical analysis. Try a different session."
+		return None, f"Insufficient data (fewer than 5 laps per driver) for statistical analysis in {session_key}."
 
 	# Process data to text format (Top 10)
 	data_lines = []
 	
-	# Rank the drivers based on the selected metric
+	# Rank the drivers based on the selected metric (Fastest Lap for Q/FP)
 	driver_stats_ranked = driver_stats.sort_values(by=ranking_column, ascending=True).head(10)
 	
 	for index, row in driver_stats_ranked.iterrows():
@@ -161,6 +163,100 @@ def load_and_process_data(year, event, session_key):
 	context_data = "\n".join(data_lines)
 
 	return context_data, session.name
+
+
+def find_last_three_races_data(current_year, event, expander_placeholder):
+	"""Finds the last three 'conventional' races that should have occurred this season and returns their race data."""
+
+	with expander_placeholder.container():
+		st.info("🔄 Starting Seasonal Data Collection (Last 3 Races)")
+		
+		schedule = None
+		current_event_date = pd.to_datetime(date.today()) # Set default to today's date
+		
+		try:
+			schedule = fastf1.get_event_schedule(current_year)
+			if schedule.empty:
+				return [], "Error: Current year's schedule is empty." 
+
+		except Exception as e:
+			return [], f"Error: Failed to load current year's schedule. {e}" 
+		
+		
+		# 1. Find the current event
+		current_event = schedule[schedule['EventName'] == event]
+		
+		# Robust handling if the current event is missing from the Schedule
+		if current_event.empty:
+			st.warning(f"⚠️ Warning: Current event ({event}) not found in the full schedule. Using today's date ({current_event_date.strftime('%Y-%m-%d')}) as a seasonal reference point.")
+			
+			# If the selected year is in the future (e.g., 2025), this might fail.
+			if current_year > date.today().year:
+				st.error("❌ Cannot perform seasonal analysis for a future year without a defined event date.")
+				return [], "❌ Cannot perform seasonal analysis for a future year."
+			
+		else:
+			try:
+				# Event found, use its information
+				current_event_date = current_event['EventDate'].iloc[0]
+				
+				current_event_round = current_event['RoundNumber'].iloc[0]
+				
+				# 2. Check round number - only if the event was found
+				if current_event_round <= 4:
+					st.warning(f"⚠️ Warning: Current event ({event}) is one of the first 4 races of the season. Insufficient seasonal context. Skipping.")
+					return [], "Seasonal skip (Race too early in the season)." 
+			except KeyError as e:
+				# If a column is missing in the Schedule
+				st.error(f"FastF1 Schedule Error: Missing column ({e}). Using today's date.")
+				# Continue with current_event_date = date.today()
+			except Exception as e:
+				# Another unexpected Schedule error
+				st.error(f"Unexpected Schedule error: {e}")
+				return [], "FastF1 Schedule Error."
+		
+		
+		# 3. Filter races based on date (or today's date if the event was not found)
+		try:
+			# Filter based on the current event date
+			potential_races = schedule.loc[
+				(schedule['EventFormat'] == 'conventional') &
+				(schedule['EventDate'] < current_event_date)
+			].sort_values(by='EventDate', ascending=False).head(3) 
+		except KeyError as e:
+			return [], f"FastF1: Missing column ({e}). Cannot perform seasonal analysis."
+		
+		
+		if potential_races.empty:
+			st.warning(f"No previous conventional races found in the {current_year} schedule before {event}.")
+			return [], f"No previous races in {current_year}." 
+		
+		race_reports = []
+		
+		for index, race in potential_races.iterrows():
+			event_name = race['EventName']
+			st.info(f"🔮 Attempting to load Race Data: {event_name} {current_year}...")
+			
+			# Attempt to load data
+			context_data, session_name = load_and_process_data(current_year, event_name, 'R')
+			
+			if context_data:
+				report = (
+					f"--- Pace Report: {event_name} {current_year} Race (Seasonal Context) ---\n"
+					f"{context_data}\n"
+				)
+				race_reports.append(report)
+				st.success(f"✅ Race data for {event_name} loaded successfully.")
+			else:
+				# If load_and_process_data fails
+				st.warning(f"⚠️ Could not load complete race data for {event_name}. AI will ignore this race. (Error: {session_name})") 
+
+		if not race_reports:
+			# Returns a seasonal failure status
+			return [], f"No complete seasonal data found in {current_year}." 
+		
+		st.success("✅ Seasonal data processed successfully. Proceeding to AI.")
+		return race_reports, "Seasonal data loaded"
 
 
 def create_prediction_prompt(context_data, year, event, session_name):
@@ -199,7 +295,7 @@ Based on: Specific Session Data ({session_name} Combined)
 ## Weather/Track Influence
 ...
 
-## Strategic Conclusions and Winner Justification
+## Strategic Conclusions and Winner Justitive
 ...
 
 ## 📊 Confidence Score Table (D5 - Visual Data)
@@ -358,7 +454,7 @@ def main():
 
 	st.set_page_config(page_title="F1 Strategy Predictor", layout="centered")
 
-	# Custom Header Image from URL (Replacing st.title)
+	# V50: Custom Header Image from URL (Replacing st.title)
 	st.markdown(
 		f"""
 		<div style='text-align: center; margin-bottom: 20px;'>
@@ -389,7 +485,7 @@ def main():
 	st.markdown("---")
 
 	# Parameter Selection
-	col1, col2, col3 = st.columns(3)
+	col1, col2 = st.columns(2) # Reduced to two columns to center the selectboxes
 
 	with col1:
 		# Translate Label
@@ -397,15 +493,29 @@ def main():
 	with col2:
 		# Translate Label
 		selected_event = st.selectbox("Track:", TRACKS, index=5, key="select_event")
-	with col3:
-		# Translate Label
-		selected_session = st.selectbox("Session:", SESSIONS, index=5, key="select_session")
-
+	
+	# The session dropdown is removed, as requested, for full automation.
+	
 	st.markdown("---")
 
 	# 1. Current Data Analysis Button
 	# Translate Button Text
 	if st.button("🏎️ Predict Winner (Current Session Data)", use_container_width=True, type="primary"):
+
+		# Logic to automatically find the latest session (R -> Q -> FP3 -> FP2 -> FP1)
+		selected_session = None
+		for session_type in SESSIONS_PRIORITY:
+			# Try to load the data for the most recent session
+			context_data, status_msg = load_and_process_data(selected_year, selected_event, session_type)
+			
+			if context_data:
+				selected_session = session_type
+				break # Found data, exit loop
+
+		if not selected_session:
+			status_msg = "Error: Failed to find valid data for any session (R, Q, FP3, FP2, FP1) for this event. Try selecting a different year or track."
+			st.error(f"❌ {status_msg}")
+			return
 
 		# Translate Subheader
 		st.subheader(f"🔄 Starting Analysis: {selected_event} {selected_year} ({selected_session})")
@@ -414,16 +524,11 @@ def main():
 		# Translate Info Message
 		status_placeholder.info("...Loading and processing data from FastF1...")
 
-		# Load and process data
-		context_data, status_msg = load_and_process_data(selected_year, selected_event, selected_session)
-
-		if context_data is None:
-			# Translate Error Message
-			status_placeholder.error(f"❌ Error: {status_msg}")
-			return
-
+		# Load and process data (using the successful context_data loaded in the loop)
+		# Note: The data is already loaded in the loop, so we only proceed to analysis.
+		
 		# Translate Success Message
-		status_placeholder.success("✅ Data processed successfully. Sending to AI for analysis...")
+		status_placeholder.success(f"✅ Data processed successfully for {selected_session}. Sending to AI for analysis...")
 
 		# Create prompt and get prediction
 		try:

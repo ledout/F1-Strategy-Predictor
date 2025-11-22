@@ -15,7 +15,6 @@ logging.getLogger('fastf1').setLevel(logging.ERROR)
 
 # **Disable FastF1 Local Cache**
 try:
-	# Setting Cache Path to None disables the local FastF1 cache.
 	fastf1.set_cache_path(None) 
 except Exception:
 	pass
@@ -29,7 +28,6 @@ TRACKS = ["Bahrain", "Saudi Arabia", "Australia", "Imola", "Miami", "Monaco",
 SESSIONS_PRIORITY = ["R", "Q", "FP3", "FP2", "FP1"] 
 YEARS = [2025, 2024, 2023, 2022, 2021, 2020]
 MODEL_NAME = "gemini-2.5-flash"
-# Custom Header Image URL (Converted to RAW format for proper loading)
 IMAGE_HEADER_URL = "https://raw.githubusercontent.com/ledout/F1-Strategy-Predictor/main/F1-App.png"
 
 
@@ -163,6 +161,43 @@ def load_and_process_data(year, event, session_key):
 	return context_data, session.name
 
 
+@st.cache_data(ttl=3600)
+def get_latest_completed_race():
+    """
+    Tries to find the latest completed conventional F1 race across all years 
+    to set the default dropdown state.
+    Returns: (year, track_name) or (2024, 'Bahrain') as default.
+    """
+    latest_date = pd.Timestamp.min
+    latest_race = None
+    
+    for year in YEARS:
+        try:
+            schedule = fastf1.get_event_schedule(year)
+            
+            # Filter for completed conventional races
+            completed_races = schedule.loc[
+                (schedule['EventCompleted'] == True) &
+                (schedule['EventFormat'] == 'conventional')
+            ]
+            
+            if not completed_races.empty:
+                last_event = completed_races.sort_values(by='EventDate', ascending=False).iloc[0]
+                
+                if last_event['EventDate'] > latest_date:
+                    latest_date = last_event['EventDate']
+                    latest_race = (year, last_event['EventName'])
+                    
+        except Exception:
+            continue
+            
+    if latest_race:
+        return latest_race
+    else:
+        # Fallback to a common race if no data is found
+        return (2024, 'Bahrain')
+
+
 def find_last_three_races_data(current_year, event, expander_placeholder):
 	"""Finds the last three 'conventional' races that should have occurred this season and returns their race data."""
 
@@ -263,7 +298,8 @@ def create_prediction_prompt(context_data, year, event, session_name):
 	prompt_data = f"--- Raw Data for Analysis (Top 10 Drivers, Race/Session Laps) ---\n{context_data}"
 
 	prompt = f"""
-You are a Senior F1 Analyst. Analyze the following combined data to provide a Preliminary (Pre-Race) Prediction Report for **{event} {year} Race**.
+You are a Senior F1 Analyst. Your task is to analyze the statistical data of the laps 
+({session_name}, {event} {year}) and provide a complete strategic report and winner prediction.
 
 {prompt_data}
 
@@ -299,7 +335,7 @@ Based on: Specific Session Data ({session_name} Combined)
 | Driver | Confidence Score (%) |
 |:--- | :--- |
 | ... | :--- |
-| ... | :--- |
+| ... | ... |
 | ... | ... |
 | ... | ... |
 | ... | ... |
@@ -444,14 +480,23 @@ Based on: {based_on_text}
 		st.error(f"❌ Gemini API Error during preliminary prediction creation: {e}")
 		return None
 
-# --- Main Streamlit Function ---
+# --- Main Streamlit Function (Updated to support Auto-Select Latest Race) ---
 
 def main():
-	"""Main function that runs the Streamlit application."""
-
+	"""
+	Main function that runs the Streamlit application.
+	Finds the latest available race and sets it as the default selection.
+	"""
+	
 	st.set_page_config(page_title="F1 Strategy Predictor", layout="centered")
 
-	# Custom Header Image from URL (Replacing st.title)
+	# --- V57 FIX: Auto-detect latest race and set initial defaults ---
+	latest_year, latest_track = get_latest_completed_race()
+
+	year_index = YEARS.index(latest_year) if latest_year in YEARS else 2
+	track_index = TRACKS.index(latest_track) if latest_track in TRACKS else 5 # Monaco
+
+	# 1. Custom Header Image and Title (Centered)
 	st.markdown(
 		f"""
 		<div style='text-align: center; margin-bottom: 20px;'>
@@ -461,41 +506,36 @@ def main():
 		unsafe_allow_html=True
 	)
 
-	# V52: Center the 'Whos on pole?' text and use a suitable font size
-	st.markdown("<div style='text-align: center; font-size: 1.5em; font-weight: bold;'>Who's on Pole?</div>", unsafe_allow_html=True)
+	# **FIXED V57: Center Who's on Pole?**
+	st.markdown("<h1 style='text-align: center; font-size: 2em; font-weight: bold; margin-bottom: 10px;'>Who's on Pole?</h1>", unsafe_allow_html=True)
 	st.markdown("---")
 
 	# API Key Check
 	try:
 		api_key_check = st.secrets.get("GEMINI_API_KEY")
 		if not api_key_check:
-			# Translate Error Message
 			st.error("❌ Error: Gemini API Key is not configured in Streamlit Secrets. Please set it.")
 		if not api_key_check:
-			# Translate Warning Message
 			st.warning("⚠️ Note: API Key is missing. The analysis will fail when attempting to connect to Gemini.")
 
 	except Exception:
-		# Translate Error Message
 		st.error("❌ Error: Failed to read API key. Ensure you have configured it correctly in Secrets.")
 
 	st.markdown("---")
 
 	# Parameter Selection
-	# **FIXED V57: Removed the 'Session' dropdown, as requested, for full automation**
 	col1, col2 = st.columns(2) 
 
 	with col1:
-		# Translate Label
-		selected_year = st.selectbox("Year:", YEARS, index=2, key="select_year")
+		# Setting initial value to the latest detected race
+		selected_year = st.selectbox("Year:", YEARS, index=YEARS.index(latest_year), key="select_year")
 	with col2:
-		# Translate Label
-		selected_event = st.selectbox("Track:", TRACKS, index=5, key="select_event")
+		# Setting initial value to the latest detected track
+		selected_event = st.selectbox("Track:", TRACKS, index=TRACKS.index(latest_track), key="select_event")
 
 	st.markdown("---")
 
-	# 1. Current Data Analysis Button
-	# Translate Button Text
+	# 1. Current Data Analysis Button (Auto-finds R, Q, FP3...)
 	if st.button("🏎️ Predict Winner (Current Session Data)", use_container_width=True, type="primary"):
 
 		# Logic to automatically find the latest session (R -> Q -> FP3 -> FP2 -> FP1)
@@ -517,17 +557,12 @@ def main():
 			st.error(f"❌ {status_msg}")
 			return
 
-		# Translate Subheader
+		# Start Analysis
 		st.subheader(f"🔄 Starting Analysis: {selected_event} {selected_year} ({selected_session})")
 
 		status_placeholder = st.empty()
-		# Translate Info Message
 		status_placeholder.info("...Loading and processing data from FastF1...")
-
-		# Load and process data (using the successful context_data loaded in the loop)
-		# Note: The data is already loaded in the loop, so we only proceed to analysis.
 		
-		# Translate Success Message
 		status_placeholder.success(f"✅ Data processed successfully for {selected_session}. Sending to AI for analysis...")
 
 		# Create prompt and get prediction
@@ -536,7 +571,6 @@ def main():
 
 			prediction_report = get_gemini_prediction(prompt)
 
-			# Translate Success Message
 			status_placeholder.success("🏆 Analysis completed successfully!")
 			st.markdown("---")
 
@@ -544,21 +578,16 @@ def main():
 			st.markdown(prediction_report)
 
 		except APIError as e:
-			# Translate Error Message
 			status_placeholder.error(f"❌ Gemini API Error: Failed to receive response. Details: {e}")
 		except ValueError as e: # Catch API Key errors from get_gemini_prediction
-			# Translate Error Message
 			status_placeholder.error(f"❌ Critical Error: {e}")
 		except Exception as e:
-			# Translate Error Message
-			st.error(f"❌ Unexpected Error: {e}")
+			status_placeholder.error(f"❌ Unexpected Error: {e}")
 
 	st.markdown("---")
 
 	# 2. Pre-Race Prediction Button
-	# Translate Button Text
 	if st.button("🔮 Preliminary Prediction (Past & Seasonal Context)", use_container_width=True, type="secondary"):
-		# Translate Subheader
 		st.subheader(f"🔮 Starting Preliminary Prediction: {selected_event} {selected_year}")
 
 		prelim_report = get_preliminary_prediction(selected_year, selected_event)

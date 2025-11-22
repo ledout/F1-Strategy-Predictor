@@ -163,11 +163,47 @@ def load_and_process_data(year, event, session_key):
 	return context_data, session.name
 
 
+def get_latest_completed_race():
+    """
+    V59 FIX: Tries to find the latest completed conventional F1 race across all years 
+    to set the default dropdown state.
+    Returns: (year, track_name) or (2024, 'Bahrain') as default.
+    """
+    latest_date = pd.Timestamp.min
+    latest_race = None
+    
+    # Start searching from the current year backwards
+    for year in sorted(YEARS, reverse=True):
+        try:
+            schedule = fastf1.get_event_schedule(year)
+            
+            # Filter for completed conventional races
+            completed_races = schedule.loc[
+                (schedule['EventCompleted'] == True) &
+                (schedule['EventFormat'] == 'conventional')
+            ]
+            
+            if not completed_races.empty:
+                last_event = completed_races.sort_values(by='EventDate', ascending=False).iloc[0]
+                
+                if last_event['EventDate'] > latest_date:
+                    latest_date = last_event['EventDate']
+                    latest_race = (year, last_event['EventName'])
+                    # Since we sort by year descending, the first found is usually the latest
+                    return latest_race # Return immediately
+                    
+        except Exception:
+            continue
+            
+    # Fallback to a common race if no data is found
+    return (2024, 'Bahrain')
+
+
 def find_last_three_races_data(current_year, event, expander_placeholder):
 	"""Finds the last three 'conventional' races that should have occurred this season and returns their race data."""
 
 	with expander_placeholder.container():
-		st.info("🔄 Starting seasonal data collection (Last 3 Races)")
+		st.info("🔄 Starting Seasonal Data Collection (Last 3 Races)")
 		
 		schedule = None
 		current_event_date = pd.to_datetime(date.today()) # Set default to today's date
@@ -448,26 +484,14 @@ Based on: {based_on_text}
 # --- Main Streamlit Function ---
 
 def main():
-	"""Main function that runs the Streamlit application."""
+	"""
+	Main function that runs the Streamlit application.
+	Finds the latest available race and sets it as the default selection.
+	"""
 
 	st.set_page_config(page_title="F1 Strategy Predictor", layout="centered")
 
-	# --- V59 FIX: Auto-detect latest race and set initial defaults ---
-	latest_year, latest_track = get_latest_completed_race()
-	
-	# Setting indexes for dropdowns based on detected values
-	try:
-	    year_index = YEARS.index(latest_year)
-	    track_index = TRACKS.index(latest_track)
-	except ValueError:
-	    # Fallback in case the track/year are not in the predefined lists
-	    latest_year = YEARS[2] # 2023
-	    latest_track = TRACKS[5] # Monaco
-	    year_index = 2 
-	    track_index = 5 
-	    
-
-	# 1. Custom Header Image and Title (Centered)
+	# Custom Header Image from URL (Replacing st.title)
 	st.markdown(
 		f"""
 		<div style='text-align: center; margin-bottom: 20px;'>
@@ -477,7 +501,7 @@ def main():
 		unsafe_allow_html=True
 	)
 
-	# **FIXED V59: Center Who's on Pole?**
+	# **FIXED V60: Centering and Styling Who's on Pole?**
 	st.markdown("<h1 style='text-align: center; font-size: 2em; font-weight: bold; margin-bottom: 10px;'>Who's on Pole?</h1>", unsafe_allow_html=True)
 	st.markdown("---")
 
@@ -495,13 +519,25 @@ def main():
 	st.markdown("---")
 
 	# Parameter Selection
-	col1, col2 = st.columns(2) # Reduced to two columns to center the selectboxes
+	col1, col2 = st.columns(2) # Two columns for Year and Track
 
+	# --- V59 FIX: Auto-detect latest race and set initial defaults ---
+	latest_year, latest_track = get_latest_completed_race()
+	
+	# Setting indexes for dropdowns based on detected values
+	try:
+	    year_index = YEARS.index(latest_year)
+	    track_index = TRACKS.index(latest_track)
+	except ValueError:
+	    # Fallback in case the track/year are not in the predefined lists
+	    latest_year = YEARS[2] # 2023
+	    latest_track = TRACKS[5] # Monaco
+	    year_index = 2 
+	    track_index = 5 
+	    
 	with col1:
-		# Setting initial value to the latest detected year
 		selected_year = st.selectbox("Year:", YEARS, index=YEARS.index(latest_year), key="select_year")
 	with col2:
-		# Setting initial value to the latest detected track
 		selected_event = st.selectbox("Track:", TRACKS, index=TRACKS.index(latest_track), key="select_track")
 
 	# The session dropdown is removed, as requested, for full automation.

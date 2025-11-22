@@ -92,7 +92,7 @@ def load_and_process_data(year, event, session_key):
 
 	laps = session.laps.reset_index(drop=True)
 
-	# --- FIX: Filter Laps Correctly (Solves KeyError: 'IsGood') ---
+	# --- Filter Laps Correctly (Solves KeyError: 'IsGood') ---
     # Try to use IsAccurate. If IsGood exists (newer FastF1), use that too if needed, but IsAccurate is safer.
 	if 'IsAccurate' in laps.columns:
 		clean_laps = laps.loc[laps['IsAccurate'] == True]
@@ -111,7 +111,7 @@ def load_and_process_data(year, event, session_key):
 
 	clean_laps['LapTime_s'] = clean_laps['LapTime'].dt.total_seconds()
 
-	# --- FIX: Split Logic for Race vs Quali/Practice ---
+	# --- Split Logic for Race vs Quali/Practice ---
 	
 	# CASE 1: RACE / SPRINT (Long Run Analysis)
 	if session_key in ["R", "S"]:

@@ -15,6 +15,7 @@ logging.getLogger('fastf1').setLevel(logging.ERROR)
 
 # **Disable FastF1 Local Cache**
 try:
+	# Setting Cache Path to None disables the local FastF1 cache.
 	fastf1.set_cache_path(None) 
 except Exception:
 	pass
@@ -25,9 +26,11 @@ TRACKS = ["Bahrain", "Saudi Arabia", "Australia", "Imola", "Miami", "Monaco",
 		  "Netherlands", "Monza", "Singapore", "Japan", "Qatar", "United States", 
 		  "Mexico", "Brazil", "Las Vegas", "Abu Dhabi", "China", "Turkey", 
 		  "France"]
+# סדר עדיפות לסשן האוטומטי: R הוא העדיפות הגבוהה ביותר
 SESSIONS_PRIORITY = ["R", "Q", "FP3", "FP2", "FP1"] 
 YEARS = [2025, 2024, 2023, 2022, 2021, 2020]
 MODEL_NAME = "gemini-2.5-flash"
+# Custom Header Image URL (Converted to RAW format for proper loading)
 IMAGE_HEADER_URL = "https://raw.githubusercontent.com/ledout/F1-Strategy-Predictor/main/F1-App.png"
 
 
@@ -113,7 +116,7 @@ def load_and_process_data(year, event, session_key):
 
 	# 5. Calculate statistics
 	
-	# Determine the ranking metric based on session type
+	# **V55 FIX: Determine the ranking metric based on session type**
 	if session_key in ["R", "S"]:
 		# For race/sprint sessions, prioritize average pace (lower is better)
 		ranking_column = 'Avg_Time_s'
@@ -161,144 +164,13 @@ def load_and_process_data(year, event, session_key):
 	return context_data, session.name
 
 
-@st.cache_data(ttl=3600)
-def get_latest_completed_race():
-    """
-    Tries to find the latest completed conventional F1 race across all years 
-    to set the default dropdown state.
-    Returns: (year, track_name) or (2024, 'Bahrain') as default.
-    """
-    latest_date = pd.Timestamp.min
-    latest_race = None
-    
-    for year in YEARS:
-        try:
-            schedule = fastf1.get_event_schedule(year)
-            
-            # Filter for completed conventional races
-            completed_races = schedule.loc[
-                (schedule['EventCompleted'] == True) &
-                (schedule['EventFormat'] == 'conventional')
-            ]
-            
-            if not completed_races.empty:
-                last_event = completed_races.sort_values(by='EventDate', ascending=False).iloc[0]
-                
-                if last_event['EventDate'] > latest_date:
-                    latest_date = last_event['EventDate']
-                    latest_race = (year, last_event['EventName'])
-                    
-        except Exception:
-            continue
-            
-    if latest_race:
-        return latest_race
-    else:
-        # Fallback to a common race if no data is found
-        return (2024, 'Bahrain')
-
-
-def find_last_three_races_data(current_year, event, expander_placeholder):
-	"""Finds the last three 'conventional' races that should have occurred this season and returns their race data."""
-
-	with expander_placeholder.container():
-		st.info("🔄 Starting seasonal data collection (Last 3 Races)")
-		
-		schedule = None
-		current_event_date = pd.to_datetime(date.today()) # Set default to today's date
-		
-		try:
-			schedule = fastf1.get_event_schedule(current_year)
-			if schedule.empty:
-				return [], "Error: Current year's schedule is empty." 
-
-		except Exception as e:
-			return [], f"Error: Failed to load current year's schedule. {e}" 
-		
-		
-		# 1. Find the current event
-		current_event = schedule[schedule['EventName'] == event]
-		
-		# Robust handling if the current event is missing from the Schedule
-		if current_event.empty:
-			st.warning(f"⚠️ Warning: Current event ({event}) not found in the full schedule. Using today's date ({current_event_date.strftime('%Y-%m-%d')}) as a seasonal reference point.")
-			
-			# If the selected year is in the future (e.g., 2025), this might fail.
-			if current_year > date.today().year:
-				st.error("❌ Cannot perform seasonal analysis for a future year without a defined event date.")
-				return [], "❌ Cannot perform seasonal analysis for a future year."
-			
-		else:
-			try:
-				# Event found, use its information
-				current_event_date = current_event['EventDate'].iloc[0]
-				
-				current_event_round = current_event['RoundNumber'].iloc[0]
-				
-				# 2. Check round number - only if the event was found
-				if current_event_round <= 4:
-					st.warning(f"⚠️ Warning: Current event ({event}) is one of the first 4 races of the season. Insufficient seasonal context. Skipping.")
-					return [], "Seasonal skip (Race too early in the season)." 
-			except KeyError as e:
-				# If a column is missing in the Schedule
-				st.error(f"FastF1 Schedule Error: Missing column ({e}). Using today's date.")
-				# Continue with current_event_date = date.today()
-			except Exception as e:
-				# Another unexpected Schedule error
-				st.error(f"Unexpected Schedule error: {e}")
-				return [], "FastF1 Schedule Error."
-		
-		
-		# 3. Filter races based on date (or today's date if the event was not found)
-		try:
-			# Filter based on the current event date
-			potential_races = schedule.loc[
-				(schedule['EventFormat'] == 'conventional') &
-				(schedule['EventDate'] < current_event_date)
-			].sort_values(by='EventDate', ascending=False).head(3) 
-		except KeyError as e:
-			return [], f"FastF1: Missing column ({e}). Cannot perform seasonal analysis."
-		
-		
-		if potential_races.empty:
-			st.warning(f"No previous conventional races found in the {current_year} schedule before {event}.")
-			return [], f"No previous races in {current_year}." 
-		
-		race_reports = []
-		
-		for index, race in potential_races.iterrows():
-			event_name = race['EventName']
-			st.info(f"🔮 Attempting to load Race Data: {event_name} {current_year}...")
-			
-			# Attempt to load data
-			context_data, session_name = load_and_process_data(current_year, event_name, 'R')
-			
-			if context_data:
-				report = (
-					f"--- Pace Report: {event_name} {current_year} Race (Seasonal Context) ---\n"
-					f"{context_data}\n"
-				)
-				race_reports.append(report)
-				st.success(f"✅ Race data for {event_name} loaded successfully.")
-			else:
-				# If load_and_process_data fails
-				st.warning(f"⚠️ Could not load complete race data for {event_name}. AI will ignore this race. (Error: {session_name})") 
-
-		if not race_reports:
-			# Returns a seasonal failure status
-			return [], f"No complete seasonal data found in {current_year}." 
-		
-		st.success("✅ Seasonal data processed successfully. Proceeding to AI.")
-		return race_reports, "Seasonal data loaded"
-
-
 def create_prediction_prompt(context_data, year, event, session_name):
 	"""Builds the complete prompt for the Gemini model for current data."""
 
 	prompt_data = f"--- Raw Data for Analysis (Top 10 Drivers, Race/Session Laps) ---\n{context_data}"
 
 	prompt = f"""
-You are a Senior F1 Analyst. Your task is to analyze the statistical data of the laps 
+You are a Senior Formula 1 Strategy Analyst. Your task is to analyze the statistical data of the laps 
 ({session_name}, {event} {year}) and provide a complete strategic report and winner prediction.
 
 {prompt_data}
@@ -335,7 +207,7 @@ Based on: Specific Session Data ({session_name} Combined)
 | Driver | Confidence Score (%) |
 |:--- | :--- |
 | ... | :--- |
-| ... | ... |
+| ... | :--- |
 | ... | ... |
 | ... | ... |
 | ... | ... |
@@ -490,11 +362,20 @@ def main():
 	
 	st.set_page_config(page_title="F1 Strategy Predictor", layout="centered")
 
-	# --- V57 FIX: Auto-detect latest race and set initial defaults ---
+	# --- V59 FIX: Auto-detect latest race and set initial defaults ---
 	latest_year, latest_track = get_latest_completed_race()
-
-	year_index = YEARS.index(latest_year) if latest_year in YEARS else 2
-	track_index = TRACKS.index(latest_track) if latest_track in TRACKS else 5 # Monaco
+	
+	# Setting indexes for dropdowns based on detected values
+	try:
+	    year_index = YEARS.index(latest_year)
+	    track_index = TRACKS.index(latest_track)
+	except ValueError:
+	    # Fallback in case the track/year are not in the predefined lists
+	    latest_year = YEARS[2] # 2023
+	    latest_track = TRACKS[5] # Monaco
+	    year_index = 2 
+	    track_index = 5 
+	    
 
 	# 1. Custom Header Image and Title (Centered)
 	st.markdown(
@@ -506,7 +387,7 @@ def main():
 		unsafe_allow_html=True
 	)
 
-	# **FIXED V57: Center Who's on Pole?**
+	# **FIXED V59: Center Who's on Pole?**
 	st.markdown("<h1 style='text-align: center; font-size: 2em; font-weight: bold; margin-bottom: 10px;'>Who's on Pole?</h1>", unsafe_allow_html=True)
 	st.markdown("---")
 
@@ -527,11 +408,13 @@ def main():
 	col1, col2 = st.columns(2) 
 
 	with col1:
-		# Setting initial value to the latest detected race
+		# Setting initial value to the latest detected year
 		selected_year = st.selectbox("Year:", YEARS, index=YEARS.index(latest_year), key="select_year")
 	with col2:
 		# Setting initial value to the latest detected track
-		selected_event = st.selectbox("Track:", TRACKS, index=TRACKS.index(latest_track), key="select_event")
+		selected_event = st.selectbox("Track:", TRACKS, index=TRACKS.index(latest_track), key="select_track")
+
+	# The session dropdown is removed, as requested, for full automation.
 
 	st.markdown("---")
 
@@ -562,6 +445,8 @@ def main():
 
 		status_placeholder = st.empty()
 		status_placeholder.info("...Loading and processing data from FastF1...")
+
+		# Load and process data (using the successful context_data loaded in the loop)
 		
 		status_placeholder.success(f"✅ Data processed successfully for {selected_session}. Sending to AI for analysis...")
 

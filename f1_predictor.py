@@ -29,7 +29,7 @@ TRACKS = ["Bahrain", "Saudi Arabia", "Australia", "Imola", "Miami", "Monaco",
 SESSIONS_PRIORITY = ["R", "Q", "FP3", "FP2", "FP1"] 
 YEARS = [2025, 2024, 2023, 2022, 2021, 2020]
 MODEL_NAME = "gemini-2.5-flash"
-# Custom Header Image URL (Converted to RAW format for proper loading)
+# Custom Header Image URL
 IMAGE_HEADER_URL = "https://raw.githubusercontent.com/ledout/F1-Strategy-Predictor/main/F1-App.png"
 
 
@@ -120,7 +120,7 @@ def load_and_process_data(year, event, session_key):
 		# For race/sprint sessions, prioritize average pace (lower is better)
 		ranking_column = 'Avg_Time_s'
 	else:
-		# For practice/qualifying, prioritize fastest lap (Best_Time_s) - CRITICAL FOR Q/FP ACCURACY
+		# For practice/qualifying, prioritize fastest lap (Best_Time_s)
 		ranking_column = 'Best_Time_s'
 		
 	# Calculate necessary stats
@@ -162,7 +162,8 @@ def load_and_process_data(year, event, session_key):
 
 	return context_data, session.name
 
-# --- NEW: Function to find the latest race (V59/V60) ---
+
+# --- NEW: Function to find the latest race (V62 - Added back!) ---
 
 @st.cache_data(ttl=3600)
 def get_latest_completed_race():
@@ -206,7 +207,7 @@ def find_last_three_races_data(current_year, event, expander_placeholder):
 	"""Finds the last three 'conventional' races that should have occurred this season and returns their race data."""
 
 	with expander_placeholder.container():
-		st.info("🔄 Starting seasonal data collection (Last 3 Races)")
+		st.info("🔄 Starting Seasonal Data Collection (Last 3 Races)")
 		
 		schedule = None
 		current_event_date = pd.to_datetime(date.today()) # Set default to today's date
@@ -323,6 +324,132 @@ Based on: Specific Session Data ({session_name} Combined)
 ## Immediate Prediction (Executive Summary)
 ...
 
+## Overall Performance Summary
+...
+
+## Tire and Strategy Deep Dive
+...
+
+## Weather/Track Influence
+...
+
+## Strategic Conclusions and Winner Justification
+...
+
+## 📊 Confidence Score Table (D5 - Visual Data)
+| Driver | Confidence Score (%) |
+|:--- | :--- |
+| ... | :--- |
+| ... | ... |
+| ... | ... |
+| ... | ... |
+| ... | ... |
+"""
+	return prompt
+
+
+def get_preliminary_prediction(current_year, event):
+	"""Combines race data from the previous year and the last three races of the current season to create a stronger pre-race prediction."""
+
+	previous_year = current_year - 1
+
+	# Translate Subheader
+	st.subheader("🏁 Data Collection for Preliminary Prediction (Pre-Race Analysis)")
+
+	# Create the closed expander for all technical reports
+	# Translate Expander Title
+	with st.expander("🛠️ Show Historical and Seasonal Data Loading Details (Diagnostics)", expanded=False):
+		expander_placeholder = st.container() # Placeholder to pass inside functions
+
+		with expander_placeholder:
+			# Translate Info Message
+			st.info(f"🔮 Analyzing track dominance: Loading race data for {event} from {previous_year}...")
+
+			# 1. Load Historical Data (Previous Year on the Same Track)
+			context_data_prev, session_name_prev = load_and_process_data(previous_year, event, 'R')
+			if context_data_prev:
+				# Translate Success Message
+				st.success(f"✅ Race data for {event} {previous_year} loaded successfully.")
+			else:
+				# Translate Warning Message
+				st.warning(f"⚠️ Warning: No complete historical data found for {event} {previous_year}. ({session_name_prev})")
+
+			st.markdown("---")
+
+		# 2. Load Seasonal Data (Last 3 Completed Races)
+		race_reports_current, status_msg = find_last_three_races_data(current_year, event, expander_placeholder)
+
+		# Display FastF1 status only if a critical failure/warning was returned
+		if "❌" in status_msg or "Error" in status_msg or "No" in status_msg:
+			st.error(status_msg)
+		elif "No complete seasonal data found" in status_msg or "Seasonal skip" in status_msg:
+			st.warning(status_msg)
+
+	# 3. Data Check and Report Unification (Outside the Expander)
+
+	based_on_text = ""
+	report_current = f"--- Seasonal Pace Report (No Seasonal Data Available) ---\n"
+
+	if context_data_prev:
+		# Translate Report Header and Description
+		report_prev = (
+			f"--- Pace Report: {event} Race {previous_year} (Historical Track Context) ---\n"
+			f"The report describes the drivers' performance on the specific track {event} in the previous year. Compare Average Pace and Var:\n"
+			f"{context_data_prev}\n"
+		)
+		based_on_text += f"{event} {previous_year} Race Data"
+	else:
+		# Translate Report Header
+		report_prev = f"--- Pace Report: {event} Race {previous_year} (No Historical Track Data Available) ---\n"
+
+	# Ensure race_reports_current is a non-empty list
+	if race_reports_current and isinstance(race_reports_current, list):
+		report_current = "\n" + "\n".join(race_reports_current)
+		num_races = len(race_reports_current)
+
+		if based_on_text:
+			based_on_text += " & "
+		based_on_text += f"Analysis of the Last {num_races} Races of {current_year}."
+	else:
+		# If no seasonal data
+		if not based_on_text:
+			based_on_text = f"No Current Season Context or Historical Data Available."
+		else:
+			based_on_text += " Only (No Current Season Context)."
+
+
+	# If there is absolutely no data (neither historical nor seasonal), stop
+	if not context_data_prev and not race_reports_current:
+		# Translate Error Message
+		st.error("❌ No historical or seasonal data available. Cannot perform analysis.")
+		return None
+
+
+	# 4. Build the prompt combining all reports
+	
+	full_data_prompt = report_prev + report_current
+
+	prompt = f"""
+You are a Senior F1 Analyst. Analyze the following combined data to provide a Preliminary (Pre-Race) Prediction Report for **{event} {current_year} Race**.
+
+{full_data_prompt}
+
+--- Analysis Guidelines (V47 - Weight 65/35, Implicit Weather) ---
+1. **Immediate Prediction (Executive Summary):** Select one winner and present the main justification (average pace, consistency, or seasonal trend) in a single sentence, **in English only**. (Mandatory)
+2. **Past Performance Analysis:** Analyze the historical report (previous year on this track). Explain who was dominant in terms of pace and consistency on this track.
+3. **Current Season Trend Analysis:** Analyze the seasonal reports. **Provide a brief summary of the trend in the balance of power between the leading teams (Red Bull, Ferrari, Mercedes) in the last 3 races.** Who is improving and who is declining?
+4. **Strategic Conclusions and Winner Justification:** Justify the winner choice based on a combination of **current seasonal capability (65% weight)** and **previous track dominance (35% weight)**. The analysis must reflect this bias.
+5. **Weather & Tire Degradation (Implicit):** Analyze the data and provide a recommended **tire strategy** for the upcoming race (e.g., Hard-Medium-Hard) and an **Pit-Stop Window** analysis. **Assume dry and normal weather conditions,** unless high Var data clearly indicates rain/wet conditions (then state this explicitly).
+6. **Confidence Score Table (D5):** Provide a Confidence Score table (in Markdown format) containing the top 5 candidates with a confidence percentage (total percentage must be 100%). **Ensure the table format appears correctly in Markdown**.
+
+--- Mandatory Output Format (Markdown, English for the entire report) ---
+🔮 Pre-Race Strategy Report: {event} {year}
+
+Based on: {based_on_text}
+
+## Immediate Prediction (Executive Summary)
+...
+
 ## Past Performance Analysis
 ...
 
@@ -413,11 +540,9 @@ def main():
 	    track_index = 5 
 	    
 	with col1:
-		selected_year = st.selectbox("Year:", YEARS, index=YEARS.index(latest_year), key="select_year")
+		selected_year = st.selectbox("Year:", YEARS, index=year_index, key="select_year")
 	with col2:
-		selected_event = st.selectbox("Track:", TRACKS, index=TRACKS.index(latest_track), key="select_track")
-
-	# The session dropdown is removed, as requested, for full automation.
+		selected_event = st.selectbox("Track:", TRACKS, index=track_index, key="select_track")
 
 	st.markdown("---")
 

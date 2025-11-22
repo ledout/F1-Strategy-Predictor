@@ -136,7 +136,6 @@ def load_and_process_data(year, event, session_key):
 	driver_stats['Avg_Time_s'] = driver_stats['Avg_Time'].dt.total_seconds()
 
 	# Only include stats if 5 or more laps were completed and variance is calculated
-	# (This remains a minimum threshold for reliable data)
 	driver_stats = driver_stats[driver_stats['Laps'] >= 5]
 	driver_stats = driver_stats[driver_stats['Var'].notna()] # Remove drivers with no variance
 
@@ -295,7 +294,7 @@ Based on: Specific Session Data ({session_name} Combined)
 ## Weather/Track Influence
 ...
 
-## Strategic Conclusions and Winner Justitive
+## Strategic Conclusions and Winner Justification
 ...
 
 ## 📊 Confidence Score Table (D5 - Visual Data)
@@ -315,25 +314,25 @@ def get_preliminary_prediction(current_year, event):
 
 	previous_year = current_year - 1
 
-	# Translate Subheader
+	# V48: Translate Subheader
 	st.subheader("🏁 Data Collection for Preliminary Prediction (Pre-Race Analysis)")
 
 	# Create the closed expander for all technical reports
-	# Translate Expander Title
+	# V48: Translate Expander Title
 	with st.expander("🛠️ Show Historical and Seasonal Data Loading Details (Diagnostics)", expanded=False):
 		expander_placeholder = st.container() # Placeholder to pass inside functions
 
 		with expander_placeholder:
-			# Translate Info Message
+			# V48: Translate Info Message
 			st.info(f"🔮 Analyzing track dominance: Loading race data for {event} from {previous_year}...")
 
 			# 1. Load Historical Data (Previous Year on the Same Track)
 			context_data_prev, session_name_prev = load_and_process_data(previous_year, event, 'R')
 			if context_data_prev:
-				# Translate Success Message
+				# V48: Translate Success Message
 				st.success(f"✅ Race data for {event} {previous_year} loaded successfully.")
 			else:
-				# Translate Warning Message
+				# V48: Translate Warning Message
 				st.warning(f"⚠️ Warning: No complete historical data found for {event} {previous_year}. ({session_name_prev})")
 
 			st.markdown("---")
@@ -454,7 +453,7 @@ def main():
 
 	st.set_page_config(page_title="F1 Strategy Predictor", layout="centered")
 
-	# V50: Custom Header Image from URL (Replacing st.title)
+	# Custom Header Image from URL (Replacing st.title)
 	st.markdown(
 		f"""
 		<div style='text-align: center; margin-bottom: 20px;'>

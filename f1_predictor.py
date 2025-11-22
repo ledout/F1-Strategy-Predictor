@@ -6,7 +6,7 @@ from google import genai
 from google.genai.errors import APIError
 from tenacity import retry, stop_after_attempt, wait_exponential
 import io 
-from datetime import date, timedelta 
+from datetime import date, datetime 
 import numpy as np 
 
 # --- Initial Setup ---
@@ -92,7 +92,8 @@ def load_and_process_data(year, event, session_key):
 
 	laps = session.laps.reset_index(drop=True)
 
-	# --- Filter Laps Correctly ---
+	# --- FIX: Filter Laps Correctly (Solves KeyError: 'IsGood') ---
+    # Try to use IsAccurate. If IsGood exists (newer FastF1), use that too if needed, but IsAccurate is safer.
 	if 'IsAccurate' in laps.columns:
 		clean_laps = laps.loc[laps['IsAccurate'] == True]
 	elif 'IsGood' in laps.columns:
@@ -110,7 +111,7 @@ def load_and_process_data(year, event, session_key):
 
 	clean_laps['LapTime_s'] = clean_laps['LapTime'].dt.total_seconds()
 
-	# --- Split Logic for Race vs Quali/Practice ---
+	# --- FIX: Split Logic for Race vs Quali/Practice ---
 	
 	# CASE 1: RACE / SPRINT (Long Run Analysis)
 	if session_key in ["R", "S"]:
@@ -169,7 +170,7 @@ def load_and_process_data(year, event, session_key):
 @st.cache_data(ttl=3600)
 def get_latest_completed_race():
     """
-    Finds the most recent F1 event (or the upcoming one this weekend).
+    Finds the most recent F1 event that has at least started (Session1Date passed).
     Returns: (year, track_name) or fallback.
     """
     latest_date = pd.Timestamp.min
@@ -181,33 +182,21 @@ def get_latest_completed_race():
         try:
             schedule = fastf1.get_event_schedule(year)
             
-            # Ensure date columns are datetime objects
-            if 'EventDate' in schedule.columns:
-                 if not pd.api.types.is_datetime64_any_dtype(schedule['EventDate']):
-                     schedule['EventDate'] = pd.to_datetime(schedule['EventDate'])
-                 
-                 # Check for "Conventional" events
-                 valid_events = schedule.loc[
-                    schedule['EventFormat'] == 'conventional'
+            # We want events where at least the weekend has started (Session1Date exists and is past)
+            if 'Session1Date' in schedule.columns:
+                 # Ensure Session1Date is datetime
+                 if not pd.api.types.is_datetime64_any_dtype(schedule['Session1Date']):
+                     schedule['Session1Date'] = pd.to_datetime(schedule['Session1Date'])
+
+                 started_events = schedule.loc[
+                    (schedule['Session1Date'] < now) &
+                    (schedule['EventFormat'] == 'conventional')
                  ]
                  
-                 if not valid_events.empty:
-                    # 1. Try to find the *closest upcoming* race (within next 4 days)
-                    upcoming = valid_events.loc[
-                        (valid_events['EventDate'] >= now) & 
-                        (valid_events['EventDate'] <= now + pd.Timedelta(days=4))
-                    ]
-                    
-                    if not upcoming.empty:
-                        next_event = upcoming.sort_values(by='EventDate', ascending=True).iloc[0]
-                        return (year, next_event['EventName'])
-                    
-                    # 2. If no upcoming race this weekend, find the *last completed* race
-                    past_events = valid_events.loc[valid_events['EventDate'] < now]
-                    
-                    if not past_events.empty:
-                        last_event = past_events.sort_values(by='EventDate', ascending=False).iloc[0]
-                        return (year, last_event['EventName'])
+                 if not started_events.empty:
+                    # Get the last one that started
+                    last_event = started_events.sort_values(by='Session1Date', ascending=False).iloc[0]
+                    return (year, last_event['EventName'])
                     
         except Exception:
             continue
@@ -429,12 +418,11 @@ def main():
 			st.subheader(f"📊 Analysis: {sel_track} {sel_year} ({found_session})")
 			
 			with st.spinner("🤖 AI Analyst is thinking..."):
-				# Generate Prompt based on the specific session type found
 				prompt = create_prediction_prompt(found_data, sel_year, sel_track, f"{sel_track} {found_session}", found_session)
-				result = get_gemini_prediction(prompt)
-				st.markdown(result)
+				res = get_gemini_prediction(prompt)
+				st.markdown(res)
 		else:
-			status.error(f"❌ No data found for {sel_track} {sel_year} (Checked R, Q, FP3, FP2, FP1). The event might be in the future.")
+			status.error(f"❌ No data found for {sel_track} {sel_year}. Event might be in the future.")
 
 	st.markdown("---")
 

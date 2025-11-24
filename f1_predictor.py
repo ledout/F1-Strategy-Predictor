@@ -92,7 +92,8 @@ def load_and_process_data(year, event, session_key):
 
 	laps = session.laps.reset_index(drop=True)
 
-	# --- Filter Laps Correctly ---
+	# --- FIX: Filter Laps Correctly (Solves KeyError: 'IsGood') ---
+    # Try to use IsAccurate. If IsGood exists (newer FastF1), use that too if needed, but IsAccurate is safer.
 	if 'IsAccurate' in laps.columns:
 		clean_laps = laps.loc[laps['IsAccurate'] == True]
 	elif 'IsGood' in laps.columns:
@@ -110,7 +111,7 @@ def load_and_process_data(year, event, session_key):
 
 	clean_laps['LapTime_s'] = clean_laps['LapTime'].dt.total_seconds()
 
-	# --- Split Logic for Race vs Quali/Practice ---
+	# --- FIX: Split Logic for Race vs Quali/Practice ---
 	
 	# CASE 1: RACE / SPRINT (Long Run Analysis)
 	if session_key in ["R", "S"]:
@@ -172,6 +173,8 @@ def get_latest_completed_race():
     Finds the most recent F1 event that has at least started (Session1Date passed).
     Returns: (year, track_name) or fallback.
     """
+    latest_date = pd.Timestamp.min
+    latest_race = None
     now = pd.Timestamp.now()
     
     # Loop backwards from current year
@@ -419,7 +422,7 @@ def main():
 				res = get_gemini_prediction(prompt)
 				st.markdown(res)
 		else:
-			status.error(f"❌ No data found for {sel_track} {sel_year} (Checked R, Q, FP3, FP2, FP1). The event might be in the future.")
+			status.error(f"❌ No data found for {sel_track} {sel_year}. Event might be in the future.")
 
 	st.markdown("---")
 
